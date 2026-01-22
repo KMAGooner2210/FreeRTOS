@@ -347,3 +347,199 @@
   
      </details> 
 
+<details>
+    <summary><strong>BÀI 2: Delay và Periodic Task</strong></summary>
+
+## **BÀI 2: Delay và Periodic Task**
+
+### **I. Tick**
+
+#### **1.1. Khái niệm**
+
+* Tick là đơn vị thời gian cơ bản nhất mà FreeRTOS sử dụng để
+
+    ◦ Lập lịch
+
+    ◦ Delay task
+
+    ◦ Timeout queue / semaphore / mutex
+
+    ◦ Đo thời gian tương đối và tuyệt đối
+
+* FreeRTOS không làm việc trực tiếp với ms mà làm việc với tick
+
+#### **1.2. Cấu tạo**
+
+*  Tick được sinh ra bởi ngắt timer định kỳ
+
+*  Trên Cortex-M
+    
+    ◦ Thường dùng SysTick timer
+
+*  Trên kiến trúc khác:
+
+    ◦ Dùng timer phần cứng tương đương
+
+*  Mỗi lần timer ngắt 
+
+    ◦ ISR của FreeRTOS chạy
+
+    ◦ Tick count tăng lên 1 
+
+#### **1.3. Tần số Tick - configTICK_RATE_HZ**
+
+*  Được định nghĩa trong `FreeRTOSConfig.h`
+
+        #define configTICK_RATE_HZ      1000
+
+    ◦ 1000 tick / giây 
+
+    ◦ 1 tick = 1 ms     
+
+*  Một số giá trị phổ biến 
+
+    | configTICK_RATE_HZ | Độ phân giải  |
+    | ------------------ | ------------- |
+    | 100                | 10 ms / tick  |
+    | 250                | 4 ms / tick   |
+    | 1000               | 1 ms / tick   |
+    | 2000               | 0.5 ms / tick |
+
+#### **1.4. Biến Tick toàn cục - xTickCount**
+
+*  FreeRTOS duy trì biến tick toàn cục 
+
+        volatile TickType_t xTickCount;
+
+*  Lưu số tick đã trôi qua kể từ khi scheduler khởi động 
+
+*  Người dùng không truy cập trực tiếp mà dùng API:
+
+        TickType_t xTaskGetTickCount(void);
+
+
+#### **1.5. Chuyển đổi Tick - ms**
+
+*  FreeRTOS cung cấp macro tiện lợi  
+
+        #define portTICK_PERIOD_MS (( TickType_t) 1000 / configTICK_RATE_HZ)
+
+
+### **II.vTaskDelay() - Delay tương đối**
+
+#### **2.1. Khái niệm**
+
+* **Cú pháp:**
+
+        void vTaskDelay(const TickType_t xTicksToDelay);
+
+    ◦   Task bị block trong xTicksToDelay
+    
+    ◦   Thời gian tính kể từ lúc gọi hàm 
+
+#### **2.2. Cơ chế**
+
+* **1.** Task gọi `vTaskDelay()`
+
+* **2.** FreeRTOS:
+
+    ◦   Đưa task sang trạng thái Blocked
+    
+    ◦   Ghi lại tick hiện tại + thời gian delay
+
+* **3.** Khi tick count đạt mốc:
+
+    ◦   Task chuyển sang ready
+
+* **4.** Scheduler chạy task khi đến lượt (theo priority)
+
+* **Lưu ý:** Task bị block không tốn CPU
+
+#### **2.3. Cách sử dụng**
+
+        vTaskDelay(pdMS_TO_TICKS(500)); // delay 500 ms
+
+    ◦   Hoặc:
+
+        vTaskDelay(500 / portTICK_PERIOD_MS);
+
+#### **2.4. Nhược điểm**
+
+* Sai số tích lũy sau mỗi chu kỳ 
+
+* Phù hợp với Task không yêu cầu chu kỳ chính xác và delay đơn lẻ
+
+        void vPeriodicTask( void *pvParameters )
+        {
+            for( ;; )
+            {
+                do_work_50ms();
+                vTaskDelay(pdMS_TO_TICKS(1000));
+            }
+        }
+
+    ◦   Giả sử:
+
+        Công việc mất 50 ms 
+
+        50 ms (work) + 1000 ms (delay) = 1050 ms 
+
+        Sai số tích lũy 50 ms sau mỗi chu kỳ 
+
+### **III.vTaskDelayUntil() – Delay tuyệt đối**
+
+#### **3.1. Khái niệm**
+
+* `vTaskDelayUntil()` là API dùng để block task cho đến một mốc thời gian tuyệt đối, được xác định dựa trên tick count hệ thống.
+
+
+#### **3.2. Cú pháp**
+
+        void vTaskDelayUntil(
+            TickType_t * const pxPreviousWakeTime,
+            const TickType_t xTimeIncrement
+        );
+
+    ◦   Task bị block đến một mốc tick tuyệt đối
+    
+    ◦   Dựa trên tick count hệ thống
+
+* **Tham số:**
+
+    ◦   **pxPreviousWakeTime**
+
+        Con trỏ tới biến lưu thời điểm task thức dậy lần trước 
+
+        Phải khởi tạo trước vòng lặp, không thay đổi thủ công 
+    
+    ◦   **xTimeIncrement**
+
+        Chu kỳ task (tính bằng tick)
+
+        Thường dùng 
+
+            pdMS_TO_TICKS(period_ms)
+
+* **Cách dùng:**
+
+        void vPeriodicTask(void *pvParameters){
+            TickType_t xLastWakeTime;
+            const TickType_t xPeriod = pdMS_TO_TICKS(1000);
+
+            xLastWakeTime = xTaskGetTickCount();
+            for(;;){
+                do_work();
+                vTaskDelayUntil(&xLastWakeTime, xPeriod);
+            }
+        }
+
+* **Điều kiện:**
+
+    ◦   Thời gian thực thi 
+
+        work_time < period
+    
+    ◦   Nếu work_time > period, TASK bị miss deadline    
+
+     </details> 
+
