@@ -348,9 +348,9 @@
      </details> 
 
 <details>
-    <summary><strong>BÀI 2: Delay và Periodic Task</strong></summary>
+    <summary><strong>BÀI 2: DELAY VÀ PERIODIC TASK</strong></summary>
 
-## **BÀI 2: Delay và Periodic Task**
+## **BÀI 2: DELAY VÀ PERIODIC TASK**
 
 ### **I. Tick**
 
