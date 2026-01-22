@@ -1,646 +1,349 @@
-# **FreeRTOS**
-
+# CHƯƠNG 4: TASK MANAGEMENT 
 <details>
-	<summary><strong>BÀI 1: GIỚI THIỆU FREERTOS</strong></summary>
+    <summary><strong>BÀI 1: TẠO VÀ QUẢN LÝ TASK</strong></summary>
 
-## **BÀI 1: GIỚI THIỆU FREERTOS**
+## **BÀI 1: TẠO VÀ QUẢN LÝ TASK**
 
-### **I. Khái niệm**
+### **I. Giới thiệu**
 
-* FreeRTOS (Free Real-Time Operating System) là một hệ điều hành thời gian thực (RTOS) mã nguồn mở, được thiết kế đặc biệt cho các hệ thống nhúng (embedded systems) chạy trên vi điều khiển (MCU) và vi xử lý (MPU).
+#### **1.1. Khái niệm**
 
-<img width="76" height="33" alt="Image" src="https://github.com/user-attachments/assets/da8b213b-e41a-4540-9997-38f9907b5afd" />
+* Task là đơn vị thực thi độc lập cơ bản nhất trong FreeRTOS, tương đương với thread trong các hệ điều hành hiện đại
 
+* Mỗi task đại diện cho một luồng xử lý logic riêng như:
 
-### **II.Tính cần thiết**
+    ◦ Đọc cảm biến
 
-#### **2.1. Kiến Trúc Super Loop**
+    ◦ Giao tiếp UART/SPI/I2C
 
-##### **2.1.1.Super Loop** 
+    ◦ Xử lý dữ liệu
 
-* Đây là mô hình lập trình nhúng kinh điển, nơi chương trình chính là một vòng lặp while(1) vô tận, lần lượt gọi các hàm xử lý.
+    ◦ Điều khiển động cơ
 
-        // MÔ HÌNH SUPER LOOP ĐIỂN HÌNH
-        void main(void) {
-            hardware_init(); // Khởi tạo phần cứng
+* Trong FreeRTOS, toàn bộ ứng dụng được xây dựng bằng nhiều task chạy song song, chứ không phải một vòng `while(1)` duy nhất
 
-            while (1) { // Vòng lặp chính - "Super Loop"
-                read_sensor();       // 50ms → block toàn bộ hệ thống
-                process_data();      // 10ms
-                update_display();    // 20ms
-                check_button();      // 1ms
-                // Tổng thời gian 1 vòng lặp: 81ms
+#### **1.2. Thành phần**
+
+*  **Task Function (Hàm thực thi)**
+    
+    ◦ Cú pháp
+
+        void vTaskFunction(void *pvParameteres);
+
+    ◦ Chạy trong vòng lặp vô hạn (`for(;;)` hoặc `while(1)`) hoặc kết thúc khi hoàn thành nhiệm vụ 
+
+    ◦ Task không được return trừ khi dùng `vTaskDelete(NULL)`
+
+    ◦ Task phải chủ động nhường CPU bằng delay, block hoặc chờ sự kiện 
+
+    ◦ VD:
+
+        void vLedTask(void *pvParameters){
+            for(;;)
+            {
+                ToggleLED();
+                vTaskDelay(pdMS_TO_TICKS(500));
             }
         }
 
-##### **2.1.2.Vấn đề thường gặp** 
+*  **Task Stack:**
 
-* **Blocking Code:**
+    ◦ Mỗi task có ngăn xếp (stack) độc lập
 
-  ◦ Bản chất: 
+    ◦ Stack dùng để lưu: biến cục bộ, tham số hàm, context khi context switch
 
-        Vi điều khiển chỉ có 1 luồng thực thi (CPU core). 
+    ◦ Kích thước stack cấp khi tạo task (đơn vị là word, không phải byte)
 
-        Khi một hàm được gọi, CPU sẽ thực thi hàm đó đến khi kết thúc thì mới chuyển sang hàm tiếp theo.
+    ◦ Nếu stack quá nhỏ sẽ dẫn đế crash hệ thống 
 
-  ◦ Hậu quả: 
-  
-        Một hàm có thời gian thực thi lâu (ví dụ: read_sensor() mất 50ms) sẽ làm delay toàn bộ hệ thống trong 50ms đó. 
+*  **Task Control Block (TCB):**
+
+    ◦ TCB là cấu trúc dữ liệu nội bộ của FreeRTOS, mỗi task có đúng một TCB
+
+    ◦ TCB chứa các thông tin như:
+
+        Con trỏ stack hiện tại 
         
-        Các hàm khác như check_button() dù chỉ mất 1ms nhưng vẫn phải chờ 50ms mới được thực hiện.
+        Priority của task 
 
-  ◦ Ví dụ thực tế: 
-  
-        Hệ thống đang đọc cảm biến nhiệt độ (chậm) thì người dùng nhấn nút → Phản hồi nút nhấn bị trễ, gây ra cảm giác "giật", "lag".
+        Trạng thái task 
 
+        Thông tin timeout 
 
-* **Priority  &  Real-Time**
+        Handle của task
 
-  ◦ Bản chất: 
-  
-        Trong Super Loop, tất cả các công việc đều có mức độ ưu tiên ngang nhau theo thứ tự trong vòng lặp. 
-  
-        Công việc quan trọng (ví dụ: xử lý báo động) không thể "cướp quyền" CPU từ một công việc ít quan trọng hơn nhưng đang chạy trước nó.
+    ◦ Người dùng không truy cập trực tiếp TCB, mà thao tác thông qua API FreeRTOS
 
-  ◦ Thời gian phản hồi (Response Time) không xác định: 
-  
-        Bạn không thể đảm bảo hệ thống sẽ phản hồi một sự kiện trong bao lâu. 
-  
-        Thời gian phản hồi tồi tệ nhất (Worst-Case Response Time) chính là thời gian của cả vòng lặp (81ms trong ví dụ). 
-  
-        Điều này là tối kỵ trong các hệ thống thời gian thực.
+#### **1.3. State của Task**
 
-* **Co-operative Multitasking &  Time Management**
+* Một task trong FreeRTOS có thể nằm ở một trong các trạng thái sau:
 
-  ◦ Co-operative: 
-  
-        Để khắc phục phần nào vấn đề blocking, lập trình viên thường phải viết các hàm ở dạng Non-Blocking (trạng thái máy - State Machine). 
-  
-        Điều này làm code trở nên rất phức tạp, khó đọc và bảo trì.
+    ◦ Running: Task đang được thực thi 
 
+    ◦ Ready: Task sẵn sàng chạy, chờ CPU 
 
-        // VIẾT THEO KIỂU STATE MACHINE - PHỨC TẠP
-        enum sensor_state { S_START, S_READING, S_DONE };
-        enum sensor_state current_state = S_START;
+    ◦ Blocked: Task đang chờ sự kiện hoặc timeout
 
-        void handle_sensor_non_blocking() {
-            switch (current_state) {
-                case S_START:
-                    start_sensor_conversion();
-                    current_state = S_READING;
-                    break;
-                case S_READING:
-                    if (is_sensor_data_ready()) {
-                        read_sensor_data();
-                        current_state = S_DONE;
-                    }
-                    break;
-                case S_DONE:
-                    // ... xử lý dữ liệu
-                    current_state = S_START;
-                    break;
-            }
-        }
+    ◦ Suspended: Task bị tạm dừng hoàn toàn  
 
-  ◦ Time Management:
-  
-        Việc đảm bảo các tác vụ chạy đúng chu kỳ (ví dụ: đọc cảm biến mỗi 100ms, cập nhật màn hình mỗi 50ms) trở nên rất "thủ công" và dễ sai sót.
+#### **1.4. Priority**
 
-* **Shared Resources &  Synchronization**
+* Priority là số nguyên 
 
-  ◦ Bản chất: 
-  
-        Trong Super Loop, vì chỉ có 1 luồng thực thi nên không xảy ra xung đột khi truy cập biến toàn cục,UART,I2C,...
+* Giá trị càng lớn, priority càng cao 
 
-        Tuy nhiên, khi sử dụng Ngắt (Interrupt), vấn đề này xuất hiện. Một biến được sửa trong hàm ngắt và cũng được đọc trong main() có thể dẫn đến race condition nếu không được bảo vệ (bằng cách tắt ngắt - rất nguy hiểm)
-        
-        FreeRTOS cung cấp các cơ chế (Semaphore, Mutex) để giải quyết vấn đề này một cách an toàn và hệ thống.
+* Phạm vi: **0 -> (configMAX_PRIORITIES - 1)**
 
+* Giá trị configMAX_PRIORITIES được định nghĩa trong `FreeRTOSConfig.h`
 
-##### **2.1.3.Giải pháp**
+* **VD:**
 
-* **Loại bỏ "Blocking Code" bằng cách chia nhỏ thành các "Task" độc lập.**
+        xTaskCreate(vTaskA, "A", 256, NULL, 1, NULL);
+        xTaskCreate(vTaskB, "B", 256, NULL, 3, NULL);
 
-        void vTaskSensor(void *pvParameters) {
-            for (;;) { // Vòng lặp vô tận của task Sensor
-                read_sensor(); // Hàm này vẫn chậm 50ms, NHƯNG...
-                vTaskDelay(pdMS_TO_TICKS(100)); // ...nó chỉ "block" chính task Sensor này.
-            }
-            // Trong 50ms đó, các task khác VẪN CHẠY BÌNH THƯỜNG.
-        }
+        -> Task B có priority cao hơn Task A
 
-        void vTaskDisplay(void *pvParameters) {
-            for (;;) {
-                update_display();
-                vTaskDelay(pdMS_TO_TICKS(50));
-            }
-        }
+#### **1.5. Scheduler trong FreeRTOS**
 
-        void vTaskButton(void *pvParameters) {
-            for (;;) {
-                check_button(); // Task này chạy rất nhanh và thường xuyên
-                vTaskDelay(pdMS_TO_TICKS(10));
-            }
-        }
+##### **1.5.1. Mô hình Scheduler**
 
-        int main(void) {
-            // 1. Khai báo các task với các độ ưu tiên khác nhau
-            xTaskCreate(vTaskSensor,  "Sensor",  128, NULL, 1, NULL); // Ưu tiên 1
-            xTaskCreate(vTaskDisplay, "Display", 128, NULL, 1, NULL); // Ưu tiên 1
-            xTaskCreate(vTaskButton,  "Button",  128, NULL, 2, NULL); // Ưu tiên 2 (CAO HƠN)
+* FreeRTOS là RTOS sử dụng :
 
-            // 2. Giao quyền điều khiển cho Kernel
-            vTaskStartScheduler();
+    ◦ Preemptive
 
-            // Sẽ không bao giờ chạy đến đây
-            for (;;) {}
-        }
+    ◦ Priority-based scheduler 
 
-  ◦ Scheduler của FreeRTOS luôn tìm task có trạng thái Ready (sẵn sàng) và có mức ưu tiên cao nhất để trao quyền sử dụng CPU.
+* Scheduler luôn chọn task có priority cao nhất 
 
-  ◦ Khi một task gọi vTaskDelay(), nó tự chuyển mình sang trạng thái Blocked (bị khóa). 
-  
-  ◦ Lúc này, Scheduler ngay lập tức chọn một task khác đang sẵn sàng để chạy. CPU không bao giờ "bị chôn" trong một task.
+* CPU không bị giữ độc quyền bởi task đang chạy 
 
-  ◦ Nếu một task ưu tiên cao (như vTaskButton) trở nên sẵn sàng, nó sẽ ngay lập tức cướp quyền (preempt) CPU từ một task ưu tiên thấp hơn đang chạy.
+##### **1.5.2. Preemption (Chiếm quyền)**
 
-* **Đảm bảo Real-Time và Preemption**
+* Nếu Task A đang Running, task B có priority cao hơn chuyển sang Ready
 
-  ◦ Thời gian phản hồi xác định: Giả sử có một task xử lý khẩn cấp vTaskEmergency với độ ưu tiên 3 (cao nhất). 
-        
-  ◦ Khi sự kiện khẩn cấp xảy ra, task này sẽ được kích hoạt. 
+* Context switch xảy ra ngay lập tức
 
-  ◦ Bộ điều phối sẽ ngay lập tức dừng task đang chạy (dù là vTaskSensor đang trong 50ms đọc cảm biến) và chuyển CPU cho vTaskEmergency. 
-        
-  ◦ Điều này đảm bảo phản hồi khẩn cấp là cực nhanh và có thể dự đoán được.
+    ◦ Task A bị tạm dừng
 
+    ◦ Task B được chạy 
 
-### **III.Các thành phần chính của FreeRTOS**
+* Điều này góp phần đảm bảo đáp ứng thời gian thực và task quan trọng luôn được xử lý sớm nhất 
 
-#### **3.1. Task (Tác vụ)**
+##### **1.5.3. Time Slicing**
 
-##### **3.1.1.Khái niệm** 
+* Nếu nhiều task cùng priority, thì `configUSE_TIME_SLICING = 1`
 
-* Task là đơn vị thực thi độc lập, có ngăn xếp riêng, ưu tiên, và trạng thái.
+* Các task sẽ:
 
-        // MÔ HÌNH SUPER LOOP ĐIỂN HÌNH
-        void main(void) {
-            hardware_init(); // Khởi tạo phần cứng
+    ◦ Chia CPU theo từng tick
 
-            while (1) { // Vòng lặp chính - "Super Loop"
-                read_sensor();       // 50ms → block toàn bộ hệ thống
-                process_data();      // 10ms
-                update_display();    // 20ms
-                check_button();      // 1ms
-                // Tổng thời gian 1 vòng lặp: 81ms
-            }
-        }
+    ◦ Chạy luân phiên (Round Robin) 
 
-##### **3.1.2.Đặc điểm** 
+##### **1.5.4. Idle Task**
 
-* **Cấu trúc TCB (Task Control Block):**
+* FreeRTOS luôn có Idle Task
 
-        typedef struct tskTaskControlBlock {
-            StackType_t *pxTopOfStack;
-            ListItem_t xStateListItem;
-            UBaseType_t uxPriority;
-            StackType_t *pxStack;
-            char pcTaskName[configMAX_TASK_NAME_LEN];
-            // ...
-        } tskTCB;
+* Priority thấp nhất (`0`)
 
+* Chạy khi không còn task Ready nào khác
 
-* **Tạo Task:**
+* Idle Task dùng để:
+
+    ◦ Dọn dẹp task đã delete
+
+    ◦ Có thể hook để tiết kiệm năng lượng (sleep)
+
+### **II.Hàm tạo Task**
+
+#### **2.1. xTaskCreate() – Tạo task động**
+
+* Hàm này cấp phát bộ nhớ cho TCB và stack từ heap của FreeRTOS
+
+* **Cú pháp:**
 
         BaseType_t xTaskCreate(
-            TaskFunction_t pvTaskCode,     // Hàm task
-            const char *pcName,            // Tên (debug)
-            uint16_t usStackDepth,         // Số word (không phải byte!)
-            void *pvParameters,            // Tham số truyền vào
-            UBaseType_t uxPriority,        // Ưu tiên (0 thấp nhất)
-            TaskHandle_t *pxCreatedTask    // Handle (NULL nếu không cần)
+            TaskFunction_t pxTaskCode,
+            const char * const pcName,
+            const uint32_t usStackDepth,
+            void * const pvParameters,
+            UBaseType_t uxPriority,
+            TaskHandle_t * const pxCreatedTask
         );
 
+* **Tham số:**
 
+    ◦   **pxTaskCode:** Hàm thực thi của task
 
-* **VD: Blink LED**
+        Con trỏ tới hàm task
 
-        /* Private function prototypes -----------------------------------------------*/
-        void RCC_Configuration(void);
-        void GPIO_Configuration(void);
-        void vBlinkTask(void *pvParameters);
+        Prototype:
 
-        /* Task definitions ----------------------------------------------------------*/
-        /**
-        * @brief  Task nhấp nháy LED
-        */
-        void vBlinkTask(void *pvParameters)
-        {
-            for(;;) {
-                // Đảo trạng thái LED
-                GPIO_WriteBit(LED_PORT, LED_PIN, 
-                            (BitAction)(1 - GPIO_ReadOutputDataBit(LED_PORT, LED_PIN)));
-                
-                // Delay 1000ms - sử dụng FreeRTOS delay
-                vTaskDelay(pdMS_TO_TICKS(1000));
+            void vTaskFunction(void *pvParameters);
+
+    ◦   **pcName:** Tên của task
+
+        Chuỗi ký tự đặt tên cho task 
+
+        Không ảnh hưởng đến scheduler 
+
+    ◦   **usStackDepth:** Kích thước stack
+
+        Kích thước stack tính bằng word (4 bytes)
+
+    ◦   **pvParameters:** Tham số truyền vào task
+
+        Con trỏ truyền dữ liệu vào task 
+
+        Được nhận trong task function 
+
+        Được sử dụng để: truyền struct, ID task, handle   
+
+    ◦   **uxPriority:** Priority của task
+
+        Độ ưu tiên của task 
+
+        Priority cao hơn -> được chạy trước  
+
+    ◦   **pxCreatedTask:** Handle của task
+
+        Con trỏ để nhận handle của task vừa tạo 
+
+        Có thể truyền NULL nếu không cần 
+
+* **Giá trị trả về:**
+
+    ◦   **pdPASS:** Tạo task thành công
+
+    ◦   **errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY:** Không đủ heap   
+
+* **Ví dụ**
+
+        void vTask1(void *pvParameters){
+            for(;;)
+            {
+                printf("Task 1 running\r\n");
+                vTaskDelay(500 / portTICK_PERIOD_MS);
             }
         }
 
-        /**
-        * @brief  Cấu hình clock hệ thống
-        */
-        void RCC_Configuration(void)
-        {
-            // Bật clock cho GPIOC
-            RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOC, ENABLE);
+        void app_main(){
+            TaskHandle_t xHandleTask1 = NULL;
+
+            xTaskCreate(
+                vTask1,         // Hàm task 
+                "Task1",        // Tên
+                2048,           // Stack depth 
+                NULL,           // Tham số 
+                2,              // Priority = 2
+                &xHandleTask1   // Handle
+            )
         }
 
-        /**
-        * @brief  Cấu hình GPIO cho LED
-        */
-        void GPIO_Configuration(void)
-        {
-            GPIO_InitTypeDef GPIO_InitStructure;
-            
-            // Cấu hình chân LED (PC13)
-            GPIO_InitStructure.GPIO_Pin = LED_PIN;
-            GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_PP;  // Output push-pull
-            GPIO_InitStructure.GPIO_Speed = GPIO_Speed_2MHz;
-            GPIO_Init(LED_PORT, &GPIO_InitStructure);
-        }
+#### **2.2. xTaskCreateStatic() – Tạo task tĩnh**
 
-        /**
-        * @brief  Hàm main
-        */
-        int main(void)
-        {
-            // Cấu hình hệ thống
-            RCC_Configuration();
-            GPIO_Configuration();
-            
-            // Tạo task blink LED
-            xTaskCreate(vBlinkTask,          // Hàm thực thi task
-                        "Blink",             // Tên task
-                        128,                 // Kích thước stack
-                        NULL,                // Tham số
-                        1,                   // Độ ưu tiên
-                        NULL);               // Task handle
-            
-            // Khởi động scheduler - KHÔNG BAO GIỜ TRẢ VỀ
-            vTaskStartScheduler();
-            
-            // Nếu đến đây có nghĩa là có lỗi
-            while(1) {
-                // Xử lý lỗi ở đây
+* Hàm này không dùng heap
+
+* Người dùng phải tự cấp phát bộ nhớ cho TCB và stack (thường là mảng static/global)
+
+* **Cú pháp:**
+
+        TaskHandle_t xTaskCreateStatic(
+            TaskFunction_t pxTaskCode,
+            const char * const pcName,
+            const uint32_t ulStackDepth,
+            void * const pvParameters,
+            UBaseType_t uxPriority,
+            StackType_t * const puxStackBuffer,
+            StaticTask_t * const pxTaskBuffer
+        );
+
+* **Tham số:**
+
+    ◦   **pxTaskCode:** Hàm thực thi của task
+
+        Con trỏ tới hàm task
+
+        Prototype:
+
+            void vTaskFunction(void *pvParameters);
+
+    ◦   **pcName:** Tên của task
+
+        Chuỗi ký tự đặt tên cho task 
+
+        Không ảnh hưởng đến scheduler 
+
+    ◦   **ulStackDepth:** Kích thước stack
+
+        Kích thước stack tính bằng word (4 bytes)
+
+    ◦   **pvParameters:** Tham số truyền vào task
+
+        Con trỏ truyền dữ liệu vào task 
+
+        Được nhận trong task function 
+
+        Được sử dụng để: truyền struct, ID task, handle   
+
+    ◦   **uxPriority:** Priority của task
+
+        Độ ưu tiên của task 
+
+        Priority cao hơn -> được chạy trước  
+
+    ◦   **puxStackBuffer:** Bộ nhớ stack do người dùng cấp 
+
+        Con trỏ tới mảng stack 
+
+        Kích thước >= ulStackDepth  
+
+    ◦   **pxTaskBuffer:** Bộ nhớ TCB do người dùng cấp 
+
+        Con trỏ tới Task Control Block 
+
+        Phải là biến static/global
+
+* **Giá trị trả về:**
+
+    ◦   **TaskHandle_t ≠ NULL:** Thành công 
+
+    ◦   **NULL:** Tham số không hợp lệ   
+
+* **Ví dụ**
+
+    ◦   Khi **configSUPPORT_STATIC_ALLOCATION = 1** trong FreeRTOSConfig.h
+
+    ◦   Hệ thống không cho phép heap hoặc cần kiểm soát bộ nhớ hoàn toàn
+
+        // Cấp phát bộ nhớ tĩnh 
+        static StackType_t xStack1[2048];
+        static StaticTask_t xTaskBuffer1;
+
+        void vTask1(void *pvParamters){
+            for(;;)
+            {
+                printf("Static Task 1 running\r\n");
+                vTaskDelay(500 / portTICK_PERIOD_MS);
             }
         }
 
-* **Trạng thái Task:**
+        void app_main(){
+            TaskHandle_t xHandleTask1 = NULL;
+            xHandleTask1 = xTaskCreateStatic(
+                vTask1,
+                "StaticTask1",
+                2048,
+                NULL,
+                2,
+                xStack1,        // Stack buffer 
+                &xTaskBuffer1   // TCB buffer 
+            );
 
-| Trạng thái | Mô tả |
-|------------|-------|
-| **Running** | Đang chạy trên CPU |
-| **Ready** | Sẵn sàng chạy, chờ CPU |
-| **Blocked** | Đang chờ queue, semaphore, delay |
-| **Suspended** | Bị tạm dừng bởi vTaskSuspend() |
-
-#### **3.2.Queue (Hàng đợi) – Giao tiếp Task**
-
-##### **3.2.1.Khái niệm** 
-
-* Queue là cơ chế an toàn luồng (thread-safe) để truyền dữ liệu giữa các task hoặc ISR → task.
-
-##### **3.2.2.Đặc điểm** 
-
-* **Tạo Queue:**
-
-        QueueHandle_t xQueueCreate(
-            UBaseType_t uxQueueLength,   // Số phần tử
-            UBaseType_t uxItemSize       // Kích thước mỗi phần tử (byte)
-        );
-
-
-* **Ví dụ: Producer – Consumer:**
-
-        QueueHandle_t xDataQueue;
-
-        void vProducer(void *pv) {
-            uint32_t data = 0;
-            for (;;) {
-                xQueueSend(xDataQueue, &data, portMAX_DELAY);
-                data++;
-                vTaskDelay(pdMS_TO_TICKS(1000));
+            if(xHandleTask1 == NULL){
+                // Tạo thất bại
             }
         }
 
-        void vConsumer(void *pv) {
-            uint32_t received;
-            for (;;) {
-                if (xQueueReceive(xDataQueue, &received, portMAX_DELAY) == pdPASS) {
-                    printf("Received: %lu\n", received);
-                }
-            }
-        }
+  
+     </details> 
 
-        // main()
-        xDataQueue = xQueueCreate(10, sizeof(uint32_t));
-        xTaskCreate(vProducer, "Prod", 128, NULL, 1, NULL);
-        xTaskCreate(vConsumer, "Cons", 128, NULL, 1, NULL);
-
-
-
-* **Queue từ ISR**
-
-        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-        xQueueSendFromISR(xQueue, &data, &xHigherPriorityTaskWoken);
-        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-
-#### **3.3.Semaphore (Tín hiệu) – Đồng bộ hóa**
-
-##### **3.3.1.Khái niệm** 
-
-* Semaphore là một cơ chế đồng bộ hóa trong lập trình đa nhiệm, dùng để kiểm soát truy cập vào tài nguyên dùng chung giữa các task hoặc đồng bộ hoạt động giữa chúng.
-
-  ◦ Được định nghĩa trong: `semphr.h`
-        
-  ◦ Tất cả API đều thread-safe và ISR-safe (nếu dùng `_FromISR`)
-
-  ◦ Dùng chung `SemaphoreHandle_t` làm kiểu handle
-
-##### **3.3.2.Phân loại Semaphore** 
-
-* **Binary Semaphore:**
-
-  ◦ Chỉ có 2 giá trị: 0 (không có) hoặc 1 (có)
-        
-  ◦ Dùng để đồng bộ sự kiện giữa các task
-
-  ◦ Dùng để bảo vệ tài nguyên đơn giản
-
-  ◦ **API Tạo Binary Semaphore**
-
-        SemaphoreHandle_t xSemaphoreCreateBinary( void );
-
-    | Giá trị trả về | Mô tả |
-    |----------------|-------|
-    | `SemaphoreHandle_t` | Handle hợp lệ |
-    | `NULL` | Tạo thất bại (hết RAM) |
-
-
-  ◦ **API Give (Báo hiệu)**
-        
-        Từ Task:
-        BaseType_t xSemaphoreGive( SemaphoreHandle_t xSemaphore );
-
-        Từ ISR:
-        BaseType_t xSemaphoreGiveFromISR( 
-            SemaphoreHandle_t xSemaphore, 
-            BaseType_t *pxHigherPriorityTaskWoken 
-        );  
-
-    | Tham số | Mô tả |
-    |---------|-------|
-    | `xSemaphore` | Handle của semaphore |
-    | `pxHigherPriorityTaskWoken` | `pdTRUE` nếu cần `portYIELD_FROM_ISR()` |
-
-    | Giá trị trả về | Mô tả |
-    |---------------|-------|
-    | `pdPASS` | Thành công |
-    | `pdFAIL` | Thất bại (đã đầy) |
-
-  ◦ **API Take (Chờ tín hiệu)**
-        
-        Từ Task:
-        BaseType_t xSemaphoreTake( 
-            SemaphoreHandle_t xSemaphore, 
-            TickType_t xTicksToWait 
-        );
-
-        Từ ISR:
-        BaseType_t xSemaphoreTakeFromISR( 
-            SemaphoreHandle_t xSemaphore, 
-            BaseType_t *pxHigherPriorityTaskWoken 
-        );
-
-
-    | Tham số | Mô tả |
-    |---------|-------|
-    | `xTicksToWait` | Thời gian chờ (tick): `portMAX_DELAY` = chờ mãi |
-
-    | Giá trị trả về | Mô tả |
-    |---------------|-------|
-    | `pdTRUE` | Lấy được semaphore |
-    | `pdFALSE` | Hết thời gian chờ |
-
-
-  ◦ Ví dụ đầy đủ: Đồng bộ ISR → Task
-
-
-        SemaphoreHandle_t xBinarySemaphore;
-
-        void EXTI0_IRQHandler(void) {
-            BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-            xSemaphoreGiveFromISR(xBinarySemaphore, &xHigherPriorityTaskWoken);
-            portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-        }
-
-        void vButtonTask(void *pvParameters) {
-            xBinarySemaphore = xSemaphoreCreateBinary();
-            for (;;) {
-                if (xSemaphoreTake(xBinarySemaphore, portMAX_DELAY) == pdTRUE) {
-                    printf("Button pressed!\n");
-                }
-            }
-        }
-
-* **Counting Semaphore:**
-
-  ◦ Giá trị từ 0 đến N (N > 1)
-        
-  ◦ Dùng để quản lý nhiều instance của tài nguyên (buffer, connection, slot...)
-
-
-  ◦ **API Tạo Counting Semaphore**
-
-        SemaphoreHandle_t xSemaphoreCreateCounting( 
-            UBaseType_t uxMaxCount, 
-            UBaseType_t uxInitialCount 
-        );
-
-    | Tham số | Mô tả |
-    |---------|-------|
-    | `uxMaxCount` | Giá trị tối đa (N) |
-    | `uxInitialCount` | Giá trị khởi tạo (≤ N) |
-
-    | Giá trị trả về | Mô tả |
-    |---------------|-------|
-    |  Handle | Thành công |
-    | `NULL` | Thất bại |
-
-
-  ◦ **API Give – Tăng giá trị semaphore**
-        
-        Từ Task (dùng được cho Counting, Binary, Mutex)
-
-        BaseType_t xSemaphoreGive( SemaphoreHandle_t xSemaphore );
-
-    | Tham số | Mô tả |
-    |---------|-------|
-    | `xSemaphore` | Handle của semaphore |
-
-
-    | Giá trị trả về | Mô tả |
-    |---------------|-------|
-    | `pdPASS` | Tăng thành công |
-    | `pdFAIL` | Thất bại: đã đạt uxMaxCount (chỉ với Counting) |
-
-
-        Từ ISR (chỉ dùng cho Counting và Binary – KHÔNG dùng cho Mutex)
-
-        BaseType_t xSemaphoreGiveFromISR( 
-        SemaphoreHandle_t xSemaphore, 
-        BaseType_t *pxHigherPriorityTaskWoken 
-    );
-
-
-  ◦ **API Take (Chờ tín hiệu) – Giảm giá trị semaphore**
-        
-        Từ Task:
-        BaseType_t xSemaphoreTake( 
-            SemaphoreHandle_t xSemaphore, 
-            TickType_t xTicksToWait 
-        );
-
-        Từ ISR:
-        BaseType_t xSemaphoreTakeFromISR( 
-            SemaphoreHandle_t xSemaphore, 
-            BaseType_t *pxHigherPriorityTaskWoken 
-        );
-
-
-    | Tham số | Mô tả |
-    |---------|-------|
-    | `xTicksToWait` | Thời gian chờ (tick): `portMAX_DELAY` = chờ mãi |
-
-    | Giá trị trả về | Mô tả |
-    |---------------|-------|
-    | `pdTRUE` | Lấy được (giảm thành công) |
-    | `pdFALSE` | Hết thời gian chờ |
-
-
-  ◦ Ví dụ đầy đủ: Quản lý 3 buffer slot
-
-
-        #define BUFFER_SLOTS  3
-        SemaphoreHandle_t xBufferSemaphore;
-
-        void vProducer(void *pv) {
-            xBufferSemaphore = xSemaphoreCreateCounting(BUFFER_SLOTS, BUFFER_SLOTS);
-            for (;;) {
-                if (xSemaphoreTake(xBufferSemaphore, portMAX_DELAY) == pdTRUE) {
-                    write_to_buffer();  // Ghi vào 1 slot
-                    vTaskDelay(100);
-                }
-            }
-        }
-
-        void vConsumer(void *pv) {
-            for (;;) {
-                process_data();  // Xử lý dữ liệu
-                xSemaphoreGive(xBufferSemaphore);  // Trả lại 1 slot
-                vTaskDelay(150);
-            }
-        }
-
-
-
-* **Mutex:**
-
-  ◦ Là binary semaphore có cơ chế ưu tiên
-        
-  ◦ Ngăn hiện tượng priority inversion
-
-  ◦ Dùng để bảo vệ tài nguyên quan trọng
-
-
-  ◦ **API Tạo Mutex**
-        
-        SemaphoreHandle_t xSemaphoreCreateMutex( void );
-
-    | Giá trị trả về | Mô tả |
-    |---------------|-------|
-    | `SemaphoreHandle_t (handle hợp lệ)` | Tạo thành công, mutex sẵn sàng (available) |
-    | `NULL` | Tạo thất bại (hết bộ nhớ heap) |
-
-        xMutex = xSemaphoreCreateMutex();
-        if (xMutex == NULL) {
-            // Xử lý lỗi: không đủ RAM
-        }
-
-
-  ◦ **API Take – Chiếm mutex**
-        
-        BaseType_t xSemaphoreTake( 
-            SemaphoreHandle_t xMutex, 
-            TickType_t xTicksToWait 
-        );
-
-
-    | Tham số | Mô tả |
-    |---------|-------|
-    | `xMutex` | Handle của mutex |
-    | `xTicksToWait` | Thời gian chờ tối đa (tick) 
- portMAX_DELAY = chờ mãi |
-
-    | Giá trị trả về | Mô tả |
-    |---------------|-------|
-    | `pdTRUE` | Chiếm được mutex |
-    | `pdFALSE` | Hết thời gian chờ |
-
-  ◦ **API Give – Nhả mutex**
-        
-        BaseType_t xSemaphoreGive( SemaphoreHandle_t xMutex );
-
-
-    | Tham số | Mô tả |
-    |---------|-------|
-    | `xMutex` | Handle của mutex |
-
-    | Giá trị trả về | Mô tả |
-    |---------------|-------|
-    | `pdPASS` | Nhả thành công |
-    | `pdFAIL` | Lỗi (gọi từ task không giữ mutex) |
-
-
-* **Recursive Mutex (Mutex lồng nhau):**
-
-  ◦ Cho phép cùng một task gọi Take nhiều lần
-
-
-  ◦ **API Tạo Mutex**
-        
-        SemaphoreHandle_t xSemaphoreCreateRecursiveMutex( void );
-
-    | Giá trị trả về | Mô tả |
-    |---------------|-------|
-    | `SemaphoreHandle_t (handle hợp lệ)` | Tạo thành công, mutex sẵn sàng (available) |
-    | `NULL` | Tạo thất bại (hết bộ nhớ heap) |
-
-        xMutex = xSemaphoreCreateMutex();
-        if (xMutex == NULL) {
-            // Xử lý lỗi: không đủ RAM
-        }
-
-
-  ◦ **API Take/ Give Recursive**
-        
-        BaseType_t xSemaphoreTakeRecursive( 
-            SemaphoreHandle_t xMutex, 
-            TickType_t xTicksToWait 
-        );
-
-        BaseType_t xSemaphoreGiveRecursive( SemaphoreHandle_t xMutex );
-
-
- 
- </details>
