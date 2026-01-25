@@ -1021,3 +1021,333 @@
 
      </details> 
 
+<details>
+    <summary><strong>BÀI 4: TASK NOTIFICATIONS</strong></summary>
+
+## **BÀI 4: TASK NOTIFICATIONS**
+
+### **I. Task Notification**
+
+#### **1.1. Khái niệm**
+
+*   Task Notification là cơ chế gửi tín hiệu trực tiếp từ task này (hoặc ISR) đến một task cụ thể mà không cần tạo đối tượng đồng bộ riêng biệt (semaphore, queue, event group)
+
+*   Mỗi task đều có cơ chế notification tích hợp sẵn trong **TCB (Task Control Block)**
+
+    ◦ Một giá trị **uint32_t** lưu notification value
+
+    ◦ Một trạng thái pending hoặc not pending
+
+    ◦ Tùy chọn đếm counter khi sử dụng kiểu give/take.
+
+
+#### **1.2. Đặc điểm**
+
+*   Context switch nhanh nhất do không cần thao tác lock/unlock danh sách queue.
+
+    ◦   Khi dùng semaphore/queue tốn thời gian vì kernel phải:
+
+        Truy cập một object đồng bộ độc lập
+
+        Thực hiện lock / unlock object đó 
+
+        Duyệt danh sách các task đang chờ object
+
+        Cập nhật danh sách scheduling
+
+    ◦   Task Notification được tích hợp trực tiếp trong TCB của task nhận 
+
+        Khi gửi notification, kernel chỉ cần ghi giá trị notification vào TCB 
+
+        Đặt trạng thái notification là pending 
+
+        Nếu task đang bị block, đưa thẳng task đó vào Ready list
+
+
+*   Mặc định mỗi task chỉ có 1 slot notification, nếu một task nhận signal từ nhiều ISR / task khác nhau thì cần bật **notification array**
+
+    ◦   Cáu hình
+
+        #define configTASK_NOTIFICATION_ARRAY_ENTRIES       N
+
+    ◦   Mỗi task lúc này sẽ có **N slot notification** , mỗi slot có: **notification value** và **notification state**
+
+*   Do được thiết kế theo mô hình **direct-to-task**, Task Notification không gửi đồng thời một sự kiện cho nhiều task 
+
+*   Mỗi task chỉ có một notification value, không hỗ trợ queue nhiều message, nên không phù hợp cho các bài toán cần luư trữ hoặc xử lý tuần tự dữ liệu 
+
+#### **1.3. Cấu hình**
+
+*   **configUSE_TASK_NOTIFICATIONS:**
+
+        #define configUSE_TASK_NOTIFICATIONS        1
+
+    ◦   Bật / tắt toàn bộ cơ chế Task Notification trong Kernel
+
+    ◦   Nếu đặt 0:
+
+        Mã nguồn liên quan đến notification không được biên dịch 
+
+        Mọi API xTaskNotify*() không tồn tại
+
+
+*   **configTASK_NOTIFICATION_ARRAY_ENTRIES:**
+
+        #define configTASK_NOTIFICATION_ARRAY_ENTRIES       1
+
+    ◦   Số notification slot trên mỗi task, mỗi task có:
+
+        Notification[0]
+
+    ◦   Có thể tăng nếu cần nhiều slot đồng thời
+
+
+### **II.API Task Notification**
+
+#### **2.1. Give/Take**
+
+##### **2.1.1. Khái niệm**
+
+*   **Give / Take** sử dụng **notification value** như một counter
+
+    ◦   Give -> counter tăng
+    
+    ◦   Take -> counter giảm (hoặc reset)
+
+##### **2.1.2. Gửi notification - Give**
+
+*   **Cú pháp:** 
+
+        BaseType_t xTaskNotifyGive(TaskHandle_t xTaskNotify);
+
+    ◦   **ISR:**
+
+        void vTaskNotifyGiveFromISR(
+            TaskHandle_t xTaskToNotify,
+            BaseType_t *pxHigherPriorityTaskWoken
+        )
+
+*   **Tham số:**
+
+    ◦   **xTaskToNotify:**
+
+        Handle của task nhận
+
+        Bắt buộc xác định rõ task
+    
+    ◦   **pxHigherPriorityTaskWoken:**
+
+        Con trỏ này cho biết liệu notification đã đánh thức một task có độ ưu tiên cao hơn task hiện đang chạy hay không.
+
+*   **Khi gọi Give:**
+
+    ◦   Tăng notification value lên 1
+
+    ◦   Set notification state = pending
+
+    ◦   Nếu task đang block ở ulTaskNotifyTake():  
+
+        Unblock task
+
+        So sánh priority
+
+*   **Sử dụng khi:**
+
+    ◦   ISR báo sự kiện xảy ra
+
+    ◦   Đếm số lần event
+
+    ◦   Đánh thức task xử lý
+
+##### **2.1.3. Nhận notification - Take**
+
+*   **Cú pháp:** 
+
+        uint32_t ulTaskNotifyTake(
+            BaseType_t xClearCountOnExit,
+            TickType_t xTicksToWait
+        );
+
+*   **Tham số:**
+
+    ◦   **xClearCountOnExit:**
+
+        Quyết định cách xử lý counter khi nhận được notification
+
+        pdTRUE:     Reset counter về 0 khi Unblock
+
+        pdFALSE:    Chỉ giảm counter đi 1
+    
+    ◦   **xTicksToWait:**
+
+        Thời gian tối đa task chờ notification
+
+*   **Giá trị trả về:**
+
+    ◦   Trả về giá trị counter trước khi bị giảm/reset
+
+    ◦   Nếu timeout → trả về 0
+
+
+#### **2.2. Notify/Wait**
+
+##### **2.2.1. Khái niệm**
+
+*   **Notify** là cơ chế gửi tín hiệu trực tiếp từ task này đến task khác
+
+*   **Wait** là cơ chế chờ nhận notification từ task khác hoặc ISR
+
+##### **2.2.2. Gửi notification**
+
+*   **Cú pháp:** 
+
+        BaseType_t xTaskNotify(
+            TaskHandle_t xTaskToNotify,
+            uint32_t ulValue,
+            eNotifyAction eAction
+        );
+
+
+    ◦   **ISR:**
+
+        BaseType_t xTaskNotifyFromISR(
+            TaskHandle_t xTaskToNotify,
+            uint32_t ulValue,
+            eNotifyAction eAction,
+            BaseType_t *pxHigherPriorityTaskWoken
+        );
+
+
+*   **Tham số:**
+
+    ◦   **xTaskToNotify:**
+
+        Task nhận notification
+    
+    ◦   **ulValue:**
+
+        Giá trị 32-bit gửi kèm (Data, Bit flag, ID, State code)
+
+    ◦   **eNotifyAction:** Quy định cách xử lý notification value
+
+        eNoAction:  Không thay đổi value, chỉ unblock task 
+
+        eSetBits:   OR bit vào notification value
+
+        eIncrement: Tăng value lên 1
+
+        eSetValueWithOverwrite:  Ghi đè value cũ bất kể đang pending hay không
+
+        eSetValueWithoutOverwrite:  Chỉ ghi nếu chưa có notification pending
+
+##### **2.2.3. Nhận notification - Wait**
+
+*   **Cú pháp:** 
+
+        BaseType_t xTaskNotifyWait(
+            uint32_t ulBitsToClearOnEntry,
+            uint32_t ulBitsToClearOnExit,
+            uint32_t *pulNotificationValue,
+            TickType_t xTicksToWait
+        );
+
+
+*   **Tham số:**
+
+    ◦   **ulBitsToClearOnEntry:**
+
+        Các bit sẽ bị xóa ngay khi bắt đầu chờ
+
+        Dùng để: Reset trạng thái cũ, tránh dính flag từ lần trước
+    
+    ◦   **xTicksToWait:**
+
+        Thời gian tối đa task chờ notification
+
+*   **ulBitsToClearOnExit:**
+
+    ◦   Các bit bị xóa sau khi đã nhận notification
+
+    ◦   Chuẩn bị cho lần chờ tiếp theo
+
+*   **pulNotificationValue:**
+
+    ◦   Con trỏ để nhận value
+
+    ◦   Có thể là: Data, Bit mask, Counter
+
+*   **xTicksToWait:**
+
+    ◦   Timeout chờ notification
+
+#### **2.3. xTaskNotifyStateClear()**
+
+##### **2.3.1. Khái niệm**
+
+*   `xTaskNotifyStateClear()` dùng để xóa trạng thái notification pending của một task, không làm thay đổi notification value.
+
+##### **2.3.2. Cú pháp**
+
+        BaseType_t xTaskNotifyStateClear(TaskHandle_t xTask);
+
+*   **Tham số:**
+
+    ◦   xTask: Handle của task cần xóa trạng thái notification.
+
+*   **Giá trị trả về:**
+
+    ◦   pdTRUE: Trước khi gọi hàm, task đang có notification pending.
+
+    ◦   pdFALSE: Task không có notification pending tại thời điểm gọi.
+
+
+#### **2.4. ulTaskNotifyValueClear()**
+
+##### **2.4.1. Khái niệm**
+
+*   `ulTaskNotifyValueClear()` dùng để xóa các bit chỉ định trong notification value mà không ảnh hưởng đến trạng thái pending hoặc block của task.
+
+##### **2.3.2. Cú pháp**
+
+        uint32_t ulTaskNotifyValueClear( TaskHandle_t xTask,
+                                        uint32_t ulBitsToClear );
+
+*   **Tham số:**
+
+    ◦   xTask: Handle của task cần xóa bit trong notification value.
+
+    ◦   ulBitsToClear: Mask bit xác định các bit cần xóa (set về 0).
+
+*   **Giá trị trả về:**
+
+    ◦   Giá trị notification value trước khi các bit được xóa.
+
+### **III.FromISR APIs**
+
+#### **3.1. Tổng quan**
+
+*   Khi Task Notification được gửi từ ISR (Interrupt Service Routine), bắt buộc phải sử dụng các API có hậu tố FromISR.
+
+*   Các API này được thiết kế chuyên biệt để hoạt động an toàn trong ngữ cảnh ngắt, nơi scheduler không được phép chạy trực tiếp.
+
+#### **3.2. Nguyên tắc**
+
+*   Khi gửi Task Notification từ ISR, luôn luôn tuân theo đầy đủ các bước sau:
+
+    ◦   Sử dụng API có hậu tố FromISR
+
+    ◦   Khai báo biến theo dõi việc chuyển ngữ cảnh
+
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+    ◦   Truyền địa chỉ biến này vào API FromISR
+
+        Để FreeRTOS xác định có cần chuyển sang task ưu tiên cao hơn hay không
+
+    ◦   Gọi portYIELD_FROM_ISR() ở cuối ISR
+
+        Đảm bảo context switch xảy ra ngay nếu task được unblock có priority cao hơn.
+
+
+     </details> 
+
