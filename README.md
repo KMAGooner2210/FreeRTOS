@@ -344,7 +344,43 @@
             }
         }
 
-  
+### **III.Hàm xóa Task - vTaskDelete()**
+
+#### **3.1. Khái niệm**
+
+*   `vTaskDelete()` là API dùng để kết thúc vòng đời của một task trong FreeRTOS.
+
+*   Khi một task bị xóa, task đó không còn được scheduler quản lý, không thể quay lại trạng thái Ready hay Running.
+
+*   Việc xóa task thường được dùng khi:
+
+    ◦   Task chỉ thực hiện một nhiệm vụ duy nhất
+
+    ◦   Một chức năng không còn cần thiết trong hệ thống.
+
+    ◦   Cần giải phóng tài nguyên cho các phần khác.
+
+#### **3.2. Cú pháp**
+
+        void vTaskDelete( TaskHandle_t xTaskToDelete );
+
+*   `xTaskToDelete` :Handle của task cần xóa, Truyền NULL task tự xóa chính nó
+
+#### **3.3. Cơ chế hoạt động**
+
+*   Khi gọi `vTaskDelete()`:
+
+    ◦   **1.** Task bị loại khỏi tất cả danh sách scheduling (Ready, Blocked, Suspended).
+
+    ◦   **2.** Trạng thái task được chuyển sang Deleted.
+
+    ◦   **3.** Bộ nhớ của task sẽ được xử lý như sau:
+
+        Task tạo động (dynamic allocation) -> TCB và stack sẽ được Idle task giải phóng từ heap.
+
+        Task tạo tĩnh (static allocation) -> Không giải phóng bộ nhớ, người dùng có thể tái sử dụng vùng buffer để tạo task mới.
+
+        
      </details> 
 
 <details>
