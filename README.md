@@ -1351,3 +1351,71 @@
 
      </details> 
 
+# CHƯƠNG 4: TASK MANAGEMENT 
+<details>
+    <summary><strong>BÀI 1: GIỚI THIỆU, PHẠM VI VÀ HÀM TÁC VỤ</strong></summary>
+
+## **BÀI 1: GIỚI THIỆU**
+
+### **I. Giới thiệu**
+
+*   Trong FreeRTOS, task (tác vụ) là đơn vị thực thi cơ bản nhất – tương đương với một luồng thực thi (thread) trong hệ điều hành thông thường 
+
+    ◦   Mỗi task có thể hiện code riêng (hàm task) và ngữ cảnh riêng (stack, registers khi context switch).
+
+    ◦   FreeRTOS cho phép tạo nhiều task chạy đồng thời (trên single-core là chia sẻ thời gian CPU theo lập lịch).
+
+*   Task phải chủ động nhường CPU bằng delay, block hoặc chờ sự kiện 
+
+    ◦   Phân bổ thời gian CPU (CPU time) cho các task.
+
+    ◦   Quyết định task nào được chạy tại bất kỳ thời điểm nào (dựa trên ưu tiên và trạng thái).
+
+    ◦   Quản lý chuyển đổi ngữ cảnh (context switch) khi cần preempt hoặc yield.
+
+### **II. Hàm tác vụ (Task Functions)**
+
+#### **2.1. Khái niệm**
+
+*   Hàm task là hàm do người dùng viết, và kernel sẽ gọi nó khi task được lập lịch chạy.
+
+*   Đây là phần code thực sự thực thi logic của task.
+
+#### **2.2. Cú pháp**
+
+        void vTaskFunction(void *pvParameteres);
+
+*   **void (trả về):** Hàm không được return giá trị 
+
+    ◦   Nếu hàm return (kết thúc bình thường) → kernel tự động gọi vTaskDelete(NULL) để xóa task đó.
+
+    ◦   Do đó, hầu hết task đều dùng vòng lặp vô hạn để chạy mãi. 
+
+*   **`* void pvParameters`:** Hàm không được return giá trị 
+
+    ◦   Con trỏ generic (void pointer), dùng để truyền tham số vào task khi tạo
+
+    ◦   Vùng nhớ mà pvParameters trỏ tới phải còn tồn tại khi task chạy (không dùng biến cục bộ trên stack của hàm tạo task, vì stack đó có thể bị giải phóng).
+
+    ◦ VD:
+
+        void vLedTask(void *pvParameters){
+            for(;;)
+            {
+                ToggleLED();
+                vTaskDelay(pdMS_TO_TICKS(500));
+            }
+        }
+
+   
+#### **2.3. Lưu ýý**
+
+*   Luôn dùng `for(;;)` hoặc `while(1)` – tránh while(condition) nếu condition có thể false (dễ gây return vô ý).
+
+*   Không dùng exit(), return từ main() hoặc hàm khác – sẽ crash RTOS.
+
+*   Nếu task chỉ chạy một lần rồi kết thúc → cho phép return (kernel sẽ xóa task tự động).
+
+*   Để tránh warning "unused parameter pvParameters" khi không dùng → có thể thêm (void)pvParameters; hoặc dùng #pragma / __attribute__((unused)).
+
+     </details> 
