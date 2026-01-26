@@ -1508,3 +1508,65 @@
 *   **Bất kỳ trạng thái nào -> Deleted**:   Gọi `vTaskDelete()` hoặc task returnreturn
 
      </details> 
+
+<details>
+    <summary><strong>BÀI 3: TẠO TÁC VỤ</strong></summary>
+
+## **BÀI 3: TẠO TÁC VỤ**
+
+### **I. Giới thiệu**
+
+*   Trong FreeRTOS, task phải được tạo rõ ràng trước khi kernel có thể lập lịch và chạy chúng 
+
+*   FreeRTOS hỗ trợ hai cách tạo task:
+
+    ◦   Dynamic allocation:
+
+        Dùng xTaskCreate() - kernel tự động cấp phát bộ nhớ cho Task Control Block (TCB) và stack từ heap
+
+    ◦   Static allocation
+
+        Dùng xTaskCreateStatic() - người dùng tự cung cấp bộ nhớ 
+
+
+### **II. Cú pháp**
+
+        BaseType_t xTaskCreate(
+            TaskFunction_t pxTaskCode,              // Con trỏ đến hàm task
+            const char * const pcName,              // Tên task (dùng cho debug)
+            const configSTACK_DEPTH_TYPE usStackDepth, // Kích thước stack (số WORD, không phải byte!)
+            void * const pvParameters,              // Tham số truyền vào hàm task
+            UBaseType_t uxPriority,                 // Ưu tiên task (0 = thấp nhất)
+            TaskHandle_t * const pxCreatedTask      // Handle để tham chiếu task sau này (có thể NULL)
+        );
+
+*   **Tham số:**
+
+    ◦   **pxTaskCode:**   Con trỏ đến hàm task
+
+    ◦   **pcName:**   Tên task dưới dạng chuỗi C (const char*)
+
+        Dùng cho debug
+
+    ◦   **usStackDepth:**  Kích thước stack tính bằng WORD (thường 4 byte)
+
+        Giá trị phổ biến: 128 - 512
+
+    ◦   **pvParameters:**  Con trỏ void* truyền vào hàm task
+
+        Thường ép kiểu bên trong hàm task                
+
+    ◦   **uxPriority:**  Ưu tiên task, từ 0 đến configMAX_PRIORITIES - 1
+
+        configMAX_PRIORITIES mặc định là 5-32
+
+        Idle task có ưu tiên 0 (không nên dùng ưu tiên 0 cho task người dùng).
+        Task ưu tiên cao hơn luôn preempt task thấp hơn 
+
+    ◦   **pxCreatedTask:**  Con trỏ đến `TaskHandle_t`
+
+        Nếu cần dùng handle sau này, truyền &xHandle
+
+        Nếu không cần truyền NULL
+
+     </details> 
