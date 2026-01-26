@@ -1419,3 +1419,92 @@
 *   Để tránh warning "unused parameter pvParameters" khi không dùng → có thể thêm (void)pvParameters; hoặc dùng #pragma / __attribute__((unused)).
 
      </details> 
+
+<details>
+    <summary><strong>BÀI 2: CÁC TRẠNG THÁI TÁC VỤ CẤP CAO</strong></summary>
+
+## **BÀI 2: CÁC TRẠNG THÁI TÁC VỤ CẤP CAO**
+
+### **I. Giới thiệu**
+
+*   FreeRTOS định nghĩa 4 trạng thái chính cho mọi task (đây là cách kernel theo dõi và quản lý task): 
+
+    ◦   Running
+
+    ◦   Ready
+
+    ◦   Blocked
+
+    ◦   SuspendedSuspended    
+
+
+### **II. Đặc điểm**
+
+#### **2.1. Running**
+
+*   Task đang chiếm quyền điều khiển CPU và code của nó đang được thực thi.
+
+*   Trên hệ thống single-core (hầu hết MCU nhúng): chỉ có đúng 1 task ở trạng thái Running tại một thời điểm.
+
+*   Task running có thể:
+
+    ◦   Tự nguyện nhường CPU (gọi vTaskDelay(), taskYIELD(), hoặc blocking API như queue receive).
+
+    ◦   Bị preempt (bị cướp CPU) bởi task có ưu tiên cao hơn hoặc bởi ngắt (ISR).
+
+#### **2.2. ReadyReady**
+
+*   Task đã sẵn sàng để chạy (không bị chặn, không bị tạm dừng), nhưng chưa được chọn để chạy vì hiện tại có task ưu tiên cao hơn (hoặc bằng) đang Running.
+
+*   Các task Ready được kernel lưu trong ready list (danh sách sẵn sàng), được sắp xếp theo ưu tiên (priority descending).
+
+*   Scheduler luôn chọn task có ưu tiên cao nhất trong ready list để đưa vào Running → đây là cơ sở của preemptive priority-based scheduling.
+
+
+#### **2.3. Blocked**
+
+*   Task đang chờ một sự kiện (event) và không thể chạy ngay được.
+
+*   Các trường hợp phổ biến gây Blocked:
+
+    ◦   Đang delay: vTaskDelay() hoặc vTaskDelayUntil().
+
+    ◦   Đang chờ nhận dữ liệu từ queue: xQueueReceive() (với timeout ≠ 0).
+
+    ◦   Đang chờ semaphore/mutex: xSemaphoreTake().
+
+    ◦   Đang chờ bit event group: xEventGroupWaitBits().
+
+*   Task Blocked không tiêu tốn CPU
+
+*   Khi sự kiện xảy ra (timeout hết), task tự động chuyển từ Blocked->ReadyReady
+
+#### **2.4. Suspended**
+
+*   Task bị tạm dừng chủ động bởi code ứng dụng (thường do task khác hoặc chính nó gọi vTaskSuspend()).
+
+*   Không chờ sự kiện gì cả → không tự động tỉnh lại (khác với Blocked).
+
+*   Chỉ trở lại Ready khi có lời gọi rõ ràng: vTaskResume() hoặc xTaskResumeFromISR().
+
+*   Thường dùng để: tạm dừng task khi debug, chuyển sang chế độ low-power, hoặc điều khiển runtime
+
+### **III. State Transition Diagram**
+
+*   **Created -> Ready**: Sau khi `xTaskCreate()` thành công
+
+*   **Ready -> Running**: Scheduler chọn task có ưu tiên cao nhất trong ready list
+
+*   **Running -> Ready**:  Bị preempt bởi task ưu tiên cao hơn, hoặc gọi `taskYIELD()`
+
+*   **Running -> Blocked**: Gọi blocking API 
+
+*   **Blocked -> Ready**: Sự kiện xảy ra hoặc timeout hết 
+
+*   **Running -> Suspended**: Gọi `vTaskSuspend()` (có thể từ task khác hoặc chính nó)
+
+*   **Suspended -> Ready**: Gọi `vTaskResume()`
+
+*   **Bất kỳ trạng thái nào -> Deleted**:   Gọi `vTaskDelete()` hoặc task returnreturn
+
+     </details> 
