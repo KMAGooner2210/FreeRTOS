@@ -576,3 +576,205 @@
     ◦   Gây jitter nếu ISR dài
     
      </details> 
+  <details>
+    <summary><strong>BÀI 3: TASK DELAY & IDLE TASK</strong></summary>
+
+## **BÀI 3: TASK DELAY & IDLE TASK**
+
+### **I. Task Delay**
+
+#### **1.1. vTaskDelay**
+
+*   `vTaskDelay()` là API dùng để đưa task vào trạng thái Blocked trong một khoảng thời gian tương đối, tính từ thời điểm task gọi hàm
+
+*   **Prototype:**
+
+        void vTaskDelay(TickType_t xTicksToDelay);
+
+*   **Tham số: xTicksToDelay**
+
+    ◦   Số tick task bị block
+
+    ◦   Đơn vị: tick hệ thống
+
+    ◦   Thường dùng macro quy đổi:
+
+        vTaskDelay(pdMS_TO_TICKS(100));
+        
+    ◦   Lưu ý:
+
+        vTaskDelay(0); -> Task nhường CPU (yield) nhưng không block   
+
+*   **Cơ chế:**
+
+    ◦   Khi task gọi:   `vTaskDelay(xTicksToDelay);`
+
+    ◦   FreeRTOS sẽ:
+
+        Lấy tick count hiện tại 
+
+        Tính: `WakeTime = CurrentTick + xTicksToDelay`
+
+        Đưa task vào Blocked list 
+
+        Khi tick count đạt WakeTime -> Task chuyển sang ready      
+
+*   **Chu kỳ thực tế:**
+
+        for(;;)
+        {
+            DoWork();
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+
+    ◦   Chu kỳ thực tế:
+
+        Chu kỳ = Thời gian xử lý + Thời gian delay
+
+    ◦   VD:
+
+        Xử lý 7 ms -> chu kỳ = 107 ms
+
+#### **1.2. vTaskDelayUntil**
+
+##### **1.2.1. Khái niệm**
+
+*   `vTaskDelayUntil()` là API dùng để tạo task chạy định kỳ với chu kỳ chính xác, bằng cách delay task đến một mốc thời gian tuyệt đối trong tương lai, thay vì delay tương đối kể từ thời điểm gọi hàm 
+
+*   **FreeRTOS sử dụng:**
+
+    ◦   **System Tick:** bộ đếm tăng đều theo `configTICK_RATE_HZ`
+
+    ◦   **Tick Count:** biến toàn cụ đếm số tick từ khi scheduler start
+
+    ◦   Mọi cơ chế delay đều dựa trên tick count, không dựa trên thời gian thực tuyệt đối (RTC)
+        
+##### **1.2.2. Prototype**
+
+        void vTaskDelayUntil( TickType_t *pxPreviousWakeTime,
+                              TickType_t xTimeIncrement );
+
+
+*   `pxPreviousWakeTime`
+
+    ◦   Con trỏ tới biến lưu thời điểm task wake gần nhất
+
+    ◦   Được dùng làm mốc thời gian tham chiếu tuyệt đối
+
+    ◦   Kernel tự cập nhật giá trị này sau mỗi chu kỳ
+
+    ◦   Khởi tạo một lần duy nhất, trước `for(;;)` của task
+
+        xLastWakeTime = xTaskGetTickCount();
+
+*   `xTimeIncrement` 
+
+    ◦   Chu kỳ task
+
+    ◦   Đơn vị: Tick
+
+    ◦   Thường quy đổi từ ms:
+
+        pdMS_TO_TICKS(period_ms)
+
+##### **1.2.3. Cơ chế**
+
+*   Giả sử:
+
+    ◦   `xLastWakeTime = T0`
+
+    ◦   `xTimeIncrement = P`
+
+*   Mỗi lần gọi
+
+        vTaskDelayUntil(&xLastWakeTime, P);
+
+*   FreeRTOS thực hiện:
+
+    ◦   1. Tính thời điểm wake tiếp theo 
+
+        NextWakeTime = xLastWakeTime + P
+
+    ◦   2. So sánh với tick hiện tại
+
+        Nếu CurrentTick < NextWakeTime -> Task bị đưa vào Blocked state
+
+        Nếu CurrentTick >= NextWakeTime -> Task không bị block, chạy ngay
+
+    ◦   3. Cập nhật
+
+        xLastWakeTime = NextWakeTime
+
+*   Mốc thời gian không bao giờ reset theo thời điểm gọi hàm
+
+### **II. Idle Task và Idle Hook**
+
+#### **2.1. Idle Task**
+
+##### **2.1.1. Khái niệm**
+
+*   Idle Task là task được kernel FreeRTOS tự động tạo khi scheduler start.
+
+*   Nó đảm bảo rằng luôn có ít nhất một task ở trạng thái Ready, để scheduler không bao giờ rơi vào trạng thái không có gì để chạy.
+
+##### **2.1.2. Đặc điểm**
+
+*   Được kernel tự tạo, người dùng không cần và không được tạo
+
+*   Priority: `Priority = 0`
+
+*   Luôn tồn tại trong suốt vòng đời hệ thống
+
+*   Chỉ chạy khi không có task Ready nào có priority > 0
+
+*   Không thể:
+
+    ◦   Xóa `vTaskDelete`
+
+    ◦   Suspend `vTaskSuspend`
+
+*   Idle task luôn phải được phép chạy, nếu không hệ thống sẽ lỗi.
+
+
+#### **2.2. Vai trò**
+
+*   Thu hồi tài nguyên task đã bị delete
+
+    ◦   Khi gọi:   `vTaskDelete(taskHandle);`
+
+        Task không bị xóa ngay lập tức 
+
+        Tài nguyên chỉ được thu hồi khi Idle Task chạy
+
+*   Đảm bảo scheduler luôn có task để chạy
+
+    ◦   Scheduler luôn chọn task Ready có priority cao nhất
+
+    ◦   Nếu không có task Ready:
+
+        Idle task sẽ ready
+
+        CPU không bị idle vô định nghĩa   
+
+#### **2.2. Idle Hook**
+
+##### **2.2.1. Khái niệm**
+
+*   Idle Hook là một callback function do người dùng định nghĩa, được kernel gọi mỗi lần Idle Task chạy.
+
+        void vApplicationIdleHook(void);
+
+    ◦   Kernel sẽ gọi hàm này bên trong vòng lặp của Idle Task
+
+##### **2.2.2. Điều kiện**
+
+*   Idle Hook chỉ được gọi khi:
+
+    ◦   `configUSE_IDLE_HOOK == 1` trong `FreeRTOSConfig.h`
+
+    ◦    Scheduler đang chạy
+
+    ◦    Không có task Ready nào khác
+
+    
+     </details> 
