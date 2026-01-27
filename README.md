@@ -702,21 +702,21 @@
 
 *    **VD:**
 
-        void vTaskADC(void *pvParameters)
-        {
-            TickType_t xLastWakeTime;
-            const TickType_t period = pdMS_TO_TICKS(100);
-        
-            xLastWakeTime = xTaskGetTickCount();
-        
-            for (;;)
+            void vTaskADC(void *pvParameters)
             {
-                Read_ADC();
-                Process_ADC_Data();
-        
-                vTaskDelayUntil(&xLastWakeTime, period);
+                TickType_t xLastWakeTime;
+                const TickType_t period = pdMS_TO_TICKS(100);
+            
+                xLastWakeTime = xTaskGetTickCount();
+            
+                for (;;)
+                {
+                    Read_ADC();
+                    Process_ADC_Data();
+            
+                    vTaskDelayUntil(&xLastWakeTime, period);
+                }
             }
-        }
 
 ##### **1.2.3. Cơ chế**
 
