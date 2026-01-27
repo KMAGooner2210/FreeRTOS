@@ -357,8 +357,8 @@
 
 *   Tổng số mức priority được xác định bởi: `configMAX_PRIORITIES`
 
-        configMAX_PRIORITIES = 5
-        Priority: 0 1 2 3 4
+            configMAX_PRIORITIES = 5
+            Priority: 0 1 2 3 4
 
 ##### **2.2.2. Cách FreeRTOS tổ chức Ready list**
 
@@ -449,14 +449,14 @@
 
 *    Nếu:
 
-        #define configUSE_TIME_SLICING 1
+            #define configUSE_TIME_SLICING 1
 
 *    Mỗi tick:
 
-        Tick 1: A
-        Tick 2: B
-        Tick 3: A
-        Tick 4: B
+            Tick 1: A
+            Tick 2: B
+            Tick 3: A
+            Tick 4: B
 
 
 
