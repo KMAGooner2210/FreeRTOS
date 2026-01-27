@@ -778,3 +778,197 @@
 
     
      </details> 
+<details>
+    <summary><strong>BÀI 4: TASK CHANGE & TASK DELETE</strong></summary>
+
+## **BÀI 4: TASK CHANGE & TASK DELETE**
+
+### **I. Changing Task Priority**
+
+#### **1.1. Khái niệm**
+
+*   Trong FreeRTOS, priority của task mặc định là cố định (fixed priority) và được thiết lập khi tạo task.
+
+*   Kernel cho phép thay đổi priority tại runtime, nhằm đáp ứng các tình huống động của hệ thống.
+
+#### **1.2. Nguyên tắc lập lịch**
+
+*   FreeRTOS sử dụng priority-based preemptive scheduling (khi configUSE_PREEMPTION = 1):
+
+    ◦   Scheduler luôn chọn task Ready có priority cao nhất
+
+    ◦   Khi priority của một task thay đổi:
+
+        Scheduler đánh giá lại ngay lập tức 
+
+        Có thể xảy ra context switch tức thì
+
+    ◦   Thay đổi priority là thao tác ảnh hưởng trực tiếp đến toàn bộ hệ thống scheduling. 
+
+#### **1.3. Thay đổi Priority**
+
+##### **1.3.1. Đặt Priority mới**
+
+        void vTaskPrioritySet( taskHandle_t xTask,
+                               UBaseType_t uxNewPriority);
+
+*   **xTask:**
+
+    ◦   Handle của task cần thay đổi priority
+
+    ◦   Truyền NULL → thay đổi priority của task hiện tại
+
+*   **uxNewPriority:**
+
+    ◦   Priority mới
+
+    ◦   Giá trị hợp lệ: `0 -> configMAX_PRIORITIES - 1`
+
+##### **1.3.2. Hành vi kernel khi đổi priority**
+
+*   **Tăng priority:**
+
+    ◦   Nếu priority mới > task đang chạy
+
+    ◦   Task có thể preempt ngay lập tức
+
+*   **Giảm priority:**
+
+    ◦   Task có thể bị preempt
+
+    ◦   CPU được nhường cho task khác
+
+*   Preempt xảy ra ngay sau khi gọi API, không cần chờ tick.
+
+#### **1.4. Lấy priority hiện tại**
+
+##### **1.4.1. Cú pháp**
+
+        UBaseType_t uxTaskPriorityGet( TaskHandle_t xTask );
+
+*   **Tham số:**
+
+    ◦   **xTask:** 
+
+        Handle của task cần đọc priority
+
+        Truyền NULL → lấy priority của task hiện tại
+
+*   **Giá trị trả về:**
+
+    ◦   Priority hiện tại của task
+        
+### **II. Deleting Tasks**
+
+#### **2.1. Khái niệm**
+
+*   Trong FreeRTOS, task có thể được xóa (delete) trong quá trình runtime, khi task:
+
+    ◦   Hoàn thành nhiệm vụ
+
+    ◦   Không còn cần thiết
+
+    ◦   Được quản lý bởi task khác (task manager)
+
+*   Việc xóa task giúp:
+
+    ◦   Giải phóng RAM (stack, TCB)
+
+    ◦   Giảm tải scheduling
+
+#### **2.2. vTaskDelete**
+
+##### **2.2.1. Prototype**
+
+        void vTaskDelete( TaskHandle_t xTaskToDelete );
+
+##### **2.2.2. Tham số**
+
+*   **xTaskToDelete:**
+
+    ◦   Handle của task cần xóa
+
+    ◦   Truyền NULL → task hiện tại tự xóa chính nó
+
+##### **2.2.3. Cơ chế**
+
+*   **1.**: Task bị loại khỏi:
+
+    ◦   Ready list
+
+    ◦   Blocked list
+
+    ◦   Suspended list (nếu có)
+
+*   **2.**: Task chuyển sang trạng thái Deleted
+
+*   **3.**: Task không bao giờ được schedule lại
+
+*   **4.**: Tài nguyên được xử lý:
+
+    ◦   Dynamic allocation:
+
+        Stack + TCB được giải phóng
+
+        Nhưng chỉ khi Idle Task chạy
+
+    ◦   Static allocation:
+
+        Kernel không free
+
+        Người dùng tự quản lý bộ nhớ    
+
+*   Idle Task đóng vai trò thu hồi tài nguyên task bị delete
+
+
+#### **2.3. Deleted State**
+
+*   Không phải trạng thái chạy thực sự
+
+*   Task:
+
+    ◦   Không Ready
+
+    ◦   Không Blocked
+
+    ◦   Không Suspended 
+
+*   Chỉ tồn tại tạm thời cho đến khi Idle Task cleanup xong
+
+### **III. Thread-Local Storage (TLS)**
+
+#### **3.1. Khái niệm**
+
+*   Thread-Local Storage (TLS) cho phép mỗi task có vùng dữ liệu riêng, nhưng dùng chung một chỉ số (index).
+
+*   Cùng một key, nhưng mỗi task giữ giá trị khác nhau
+
+#### **3.2. Cấu hình**
+
+        #define configNUM_THREAD_LOCAL_STORAGE_POINTERS 4
+
+#### **3.3. API**
+
+##### **3.3.1. Gán TLS cho task**
+
+        void vTaskSetThreadLocalStoragePointer(
+            TaskHandle_t xTask,
+            BaseType_t xIndex,
+            void *pvValue
+        );
+
+
+*   xTask: handle task (NULL → task hiện tại)
+
+*   xIndex: chỉ số TLS (0 → max-1)
+
+*   pvValue: con trỏ dữ liệu
+
+##### **3.3.2. Lấy TLS**
+
+        void *pvTaskGetThreadLocalStoragePointer(
+            TaskHandle_t xTask,
+            BaseType_t xIndex
+        );
+
+     </details> 
