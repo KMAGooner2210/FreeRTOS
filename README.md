@@ -644,6 +644,20 @@
 
         Xử lý 7 ms -> chu kỳ = 107 ms
 
+*    **VD:**
+  
+        void vTaskLED(void *pvParameters)
+        {
+            for (;;)
+            {
+                GPIOC->BRR  = GPIO_Pin_13;   // LED ON
+                vTaskDelay(pdMS_TO_TICKS(100));
+        
+                GPIOC->BSRR = GPIO_Pin_13;   // LED OFF
+                vTaskDelay(pdMS_TO_TICKS(100));
+            }
+        }
+
 #### **1.2. vTaskDelayUntil**
 
 ##### **1.2.1. Khái niệm**
@@ -685,6 +699,24 @@
     ◦   Thường quy đổi từ ms:
 
         pdMS_TO_TICKS(period_ms)
+
+*    **VD:**
+
+        void vTaskADC(void *pvParameters)
+        {
+            TickType_t xLastWakeTime;
+            const TickType_t period = pdMS_TO_TICKS(100);
+        
+            xLastWakeTime = xTaskGetTickCount();
+        
+            for (;;)
+            {
+                Read_ADC();
+                Process_ADC_Data();
+        
+                vTaskDelayUntil(&xLastWakeTime, period);
+            }
+        }
 
 ##### **1.2.3. Cơ chế**
 
