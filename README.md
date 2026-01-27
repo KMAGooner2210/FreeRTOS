@@ -102,7 +102,9 @@
 
 #### **3.2. Đặc điểm**
 
-*   **Running:**
+##### **3.2.1.Running**
+
+*    **Đặc điểm:**
 
     ◦   Task đang chiếm quyền điều khiển CPU và code của nó đang được thực thi.
 
@@ -114,8 +116,24 @@
 
         Bị preempt (bị cướp CPU) bởi task có ưu tiên cao hơn hoặc bởi ngắt (ISR).
 
+*    **VD:**
 
-*   **Ready:**
+        void vLedTask(void *pvParameters)
+        {
+            while(1)
+            {
+                GPIOC->ODR ^= (1 << 13); // LED ON/OFF
+                vTaskDelay(pdMS_TO_TICKS(500));
+            }
+        }
+
+    ◦   Khi CPU đang thực thi dòng `GPIOC->ODR ^= ...`, vLedTask ở trạng thái Running
+
+    ◦   Nếu có task khác priority cao hơn: LED task bị preempt, chuyển về Ready  
+  
+##### **3.2.2.Ready**
+
+*    **Đặc điểm:**
 
     ◦   Task đã sẵn sàng để chạy (không bị chặn, không bị tạm dừng), nhưng chưa được chọn để chạy vì hiện tại có task ưu tiên cao hơn (hoặc bằng) đang Running.
 
@@ -123,8 +141,19 @@
 
     ◦   Scheduler luôn chọn task có ưu tiên cao nhất trong ready list để đưa vào Running → đây là cơ sở của preemptive priority-based scheduling.
 
-*   **Blocked:**
+*    **VD:**
 
+        xTaskCreate(vLedTask,  "LED", 128, NULL, 1, NULL);
+        xTaskCreate(vUartTask, "UART",256, NULL, 1, NULL);
+
+    ◦   Cả hai: Không delay, block -> Ready
+    
+    ◦   Scheduler:  Chia CPU theo time slicing (nếu `configUSE_TIME_SLICING = 1`)
+    
+##### **3.2.3.Blocked**
+
+*    **Đặc điểm:**
+  
     ◦   Task đang chờ một sự kiện (event) và không thể chạy ngay được.
 
     ◦   Các trường hợp phổ biến gây Blocked:
@@ -141,8 +170,30 @@
 
     ◦   Khi sự kiện xảy ra (timeout hết), task tự động chuyển từ Blocked->Ready   
 
-*   **Suspended:**
+*    **VD1: Delay**
 
+        vTaskDelay(pdMS_TO_TICKS(1000));
+
+    ◦   Task chuyển sang Blocked 
+
+    ◦   Không tiêu tốn CPU 
+
+*    **VD2: Chờ dữ liệu UART (Queue)**
+
+        xQueueReceive(uartQueue, &rxData, portMAX_DELAY);
+
+    ◦   Task Blocked cho đến khi
+
+        ISR UART nhận dữ liệu
+
+        Gọi xQueueSendFromISR()
+
+    ◦   Task Blocked → Ready → Running    
+  
+##### **3.2.4.Suspended:**
+
+*    **Đặc điểm:**
+  
     ◦   Task bị tạm dừng chủ động bởi code ứng dụng (thường do task khác hoặc chính nó gọi `vTaskSuspend()`.
 
     ◦   Không chờ sự kiện gì cả → không tự động tỉnh lại (khác với Blocked).
@@ -163,6 +214,15 @@
 
     ◦   Khi sự kiện xảy ra (timeout hết), task tự động chuyển từ Blocked->Ready
 
+*    **VD1: Tạm dùng task ADC**
+
+        ADC task:Không delay, timeout, tự wake
+
+    ◦   Chỉ wakeup khi:
+
+        vTaskResume(adcTaskHandle);
+
+    
 #### **3.3. State Transition Diagram**
 
 <img width="502" height="536" alt="Image" src="https://github.com/user-attachments/assets/da3f7ad0-45f0-41ce-91a3-615e2bc38b67" />
