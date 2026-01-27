@@ -865,6 +865,23 @@
 
     ◦   Giá trị hợp lệ: `0 -> configMAX_PRIORITIES - 1`
 
+            void vTaskWorker(void *pvParameters)
+            {
+                for (;;)
+                {
+                    if (urgent_event)
+                    {
+                        vTaskPrioritySet(NULL, 4);  // nâng priority task hiện tại
+                    }
+            
+                    DoWork();
+            
+                    vTaskPrioritySet(NULL, 1);      // hạ priority sau khi xong
+                    vTaskDelay(pdMS_TO_TICKS(100));
+                }
+            }
+
+
 ##### **1.3.2. Hành vi kernel khi đổi priority**
 
 *   **Tăng priority:**
@@ -1004,6 +1021,25 @@
 *   xIndex: chỉ số TLS (0 → max-1)
 
 *   pvValue: con trỏ dữ liệu
+
+*   **VD:**
+
+            void vTaskA(void *pvParameters)
+            {
+                const char *taskName = "TaskA";
+            
+                vTaskSetThreadLocalStoragePointer(
+                    NULL,
+                    TLS_LOGGER_ID,
+                    (void *)taskName
+                );
+            
+                for (;;)
+                {
+                    Log("Hello");
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                }
+            }
 
 ##### **3.3.2. Lấy TLS**
 
