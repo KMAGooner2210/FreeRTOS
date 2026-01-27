@@ -372,6 +372,8 @@
 
         Một bitmask cho biết priority nào hiện đang có task Ready
 
+        bitmap = 0b001011 (Có task Ready tại priority: 0, 1, 3)
+
 
 #### **2.3. Cơ chế Preemption**
 
@@ -397,6 +399,21 @@
 
     ◦   Hoặc ngay khi ISR kết thúc (`portYIELD_FROM_ISR()`)
 
+##### **2.3.3. VD**
+
+*   **USART ISR đánh thức task**
+
+        xQueueSendFromISR(uartQueue, &data, &xHigherPriorityTaskWoken);
+        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+
+*   Nếu:
+
+    ◦   TaskUART priority = 3
+
+    ◦   Task đang chạy priority = 1
+
+    ◦   Context switch ngay khi thoát ISR, không cần đợi tick
+    
 #### **2.4. Time Slicing**
 
 ##### **2.4.1. Điều kiện kích hoạt**
@@ -425,92 +442,21 @@
 
 #### **2.5. VD**
 
-        #include "FreeRTOS.h"
-        #include "task.h"
-        #include "stm32f10x.h"
+*    Hai task cùng priority = 2
+  
+        xTaskCreate(TaskA, "A", 256, NULL, 2, NULL);
+        xTaskCreate(TaskB, "B", 256, NULL, 2, NULL);
 
-        /* ===== Hardware Init ===== */
-        void LED_Init(void)
-        {
-            RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOC, ENABLE);
+*    Nếu:
 
-            GPIO_InitTypeDef gpio;
-            gpio.GPIO_Pin   = GPIO_Pin_13;
-            gpio.GPIO_Mode  = GPIO_Mode_Out_PP;
-            gpio.GPIO_Speed = GPIO_Speed_2MHz;
-            GPIO_Init(GPIOC, &gpio);
+        #define configUSE_TIME_SLICING 1
 
-            GPIOC->BSRR = GPIO_Pin_13; // LED OFF (PC13 active low)
-        }
+*    Mỗi tick:
 
-        /* ===== Task 1: High Priority (Real-time) ===== */
-        void vTaskCritical(void *pvParameters)   // Priority 4
-        {
-            for (;;)
-            {
-                GPIOC->BRR = GPIO_Pin_13;   // LED ON
-                vTaskDelay(pdMS_TO_TICKS(50));
-
-                GPIOC->BSRR = GPIO_Pin_13;  // LED OFF
-                vTaskDelay(pdMS_TO_TICKS(50));
-            }
-        }
-
-        /* ===== Task 2: Medium Priority (CPU Heavy) ===== */
-        void vTaskHeavy(void *pvParameters)       // Priority 2
-        {
-            for (;;)
-            {
-                for (volatile uint32_t i = 0; i < 100000; i++)
-                {
-                    __NOP();   // giả lập xử lý nặng ~100 ms
-                }
-
-                vTaskDelay(pdMS_TO_TICKS(100));
-            }
-        }
-
-        /* ===== Task 3: Low Priority (Background) ===== */
-        void vTaskBackground(void *pvParameters)  // Priority 1
-        {
-            for (;;)
-            {
-                vTaskDelay(pdMS_TO_TICKS(1000));
-            }
-        }
-
-        /* ===== Main ===== */
-        int main(void)
-        {
-            SystemInit();
-            LED_Init();
-
-            xTaskCreate(vTaskCritical,
-                        "Critical",
-                        256,
-                        NULL,
-                        4,
-                        NULL);
-
-            xTaskCreate(vTaskHeavy,
-                        "Heavy",
-                        256,
-                        NULL,
-                        2,
-                        NULL);
-
-            xTaskCreate(vTaskBackground,
-                        "Background",
-                        128,
-                        NULL,
-                        1,
-                        NULL);
-
-            vTaskStartScheduler();
-
-            /* Không bao giờ chạy tới đây */
-            while (1);
-        }
+        Tick 1: A
+        Tick 2: B
+        Tick 3: A
+        Tick 4: B
 
 
 
@@ -533,6 +479,9 @@
     ◦   SysTick là timer 24-bit tích hợp trong Cortex-M
 
     ◦   Được thiết kế riêng để: tạo interrupt định kỳ, phục vụ hệ điều hành thời gian thực
+
+        SysTick_Config(SystemCoreClock / configTICK_RATE_HZ);
+
 
 *   **vai trò: Mỗi lần xảy ra tick interrupt, FreeRTOS sẽ:**
 
