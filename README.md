@@ -106,15 +106,15 @@
 
 *    **Đặc điểm:**
 
-    ◦   Task đang chiếm quyền điều khiển CPU và code của nó đang được thực thi.
-
-    ◦   Trên hệ thống single-core (hầu hết MCU nhúng): chỉ có đúng 1 task ở trạng thái Running tại một thời điểm.
-
-    ◦   Task running có thể:
-
-        Tự nguyện nhường CPU (gọi vTaskDelay(), taskYIELD(), hoặc blocking API như queue receive)
-
-        Bị preempt (bị cướp CPU) bởi task có ưu tiên cao hơn hoặc bởi ngắt (ISR).
+        ◦   Task đang chiếm quyền điều khiển CPU và code của nó đang được thực thi.
+    
+        ◦   Trên hệ thống single-core (hầu hết MCU nhúng): chỉ có đúng 1 task ở trạng thái Running tại một thời điểm.
+    
+        ◦   Task running có thể:
+    
+            Tự nguyện nhường CPU (gọi vTaskDelay(), taskYIELD(), hoặc blocking API như queue receive)
+    
+            Bị preempt (bị cướp CPU) bởi task có ưu tiên cao hơn hoặc bởi ngắt (ISR).
 
 *    **VD:**
 
@@ -127,100 +127,100 @@
             }
         }
 
-    ◦   Khi CPU đang thực thi dòng `GPIOC->ODR ^= ...`, vLedTask ở trạng thái Running
-
-    ◦   Nếu có task khác priority cao hơn: LED task bị preempt, chuyển về Ready  
+        ◦   Khi CPU đang thực thi dòng `GPIOC->ODR ^= ...`, vLedTask ở trạng thái Running
+    
+        ◦   Nếu có task khác priority cao hơn: LED task bị preempt, chuyển về Ready  
   
 ##### **3.2.2.Ready**
 
 *    **Đặc điểm:**
 
-    ◦   Task đã sẵn sàng để chạy (không bị chặn, không bị tạm dừng), nhưng chưa được chọn để chạy vì hiện tại có task ưu tiên cao hơn (hoặc bằng) đang Running.
-
-    ◦   Các task Ready được kernel lưu trong ready list (danh sách sẵn sàng), được sắp xếp theo ưu tiên (priority descending).
-
-    ◦   Scheduler luôn chọn task có ưu tiên cao nhất trong ready list để đưa vào Running → đây là cơ sở của preemptive priority-based scheduling.
+        ◦   Task đã sẵn sàng để chạy (không bị chặn, không bị tạm dừng), nhưng chưa được chọn để chạy vì hiện tại có task ưu tiên cao hơn (hoặc bằng) đang Running.
+    
+        ◦   Các task Ready được kernel lưu trong ready list (danh sách sẵn sàng), được sắp xếp theo ưu tiên (priority descending).
+    
+        ◦   Scheduler luôn chọn task có ưu tiên cao nhất trong ready list để đưa vào Running → đây là cơ sở của preemptive priority-based scheduling.
 
 *    **VD:**
 
         xTaskCreate(vLedTask,  "LED", 128, NULL, 1, NULL);
         xTaskCreate(vUartTask, "UART",256, NULL, 1, NULL);
 
-    ◦   Cả hai: Không delay, block -> Ready
-    
-    ◦   Scheduler:  Chia CPU theo time slicing (nếu `configUSE_TIME_SLICING = 1`)
+        ◦   Cả hai: Không delay, block -> Ready
+        
+        ◦   Scheduler:  Chia CPU theo time slicing (nếu `configUSE_TIME_SLICING = 1`)
     
 ##### **3.2.3.Blocked**
 
 *    **Đặc điểm:**
   
-    ◦   Task đang chờ một sự kiện (event) và không thể chạy ngay được.
-
-    ◦   Các trường hợp phổ biến gây Blocked:
-
-        Đang delay: vTaskDelay() hoặc vTaskDelayUntil().
-
-        Đang chờ nhận dữ liệu từ queue: xQueueReceive() (với timeout ≠ 0).
-
-        Đang chờ semaphore/mutex: xSemaphoreTake().
-
-        Đang chờ bit event group: xEventGroupWaitBits().
-
-    ◦   Task Blocked không tiêu tốn CPU
-
-    ◦   Khi sự kiện xảy ra (timeout hết), task tự động chuyển từ Blocked->Ready   
+        ◦   Task đang chờ một sự kiện (event) và không thể chạy ngay được.
+    
+        ◦   Các trường hợp phổ biến gây Blocked:
+    
+            Đang delay: vTaskDelay() hoặc vTaskDelayUntil().
+    
+            Đang chờ nhận dữ liệu từ queue: xQueueReceive() (với timeout ≠ 0).
+    
+            Đang chờ semaphore/mutex: xSemaphoreTake().
+    
+            Đang chờ bit event group: xEventGroupWaitBits().
+    
+        ◦   Task Blocked không tiêu tốn CPU
+    
+        ◦   Khi sự kiện xảy ra (timeout hết), task tự động chuyển từ Blocked->Ready   
 
 *    **VD1: Delay**
 
-        vTaskDelay(pdMS_TO_TICKS(1000));
-
-    ◦   Task chuyển sang Blocked 
-
-    ◦   Không tiêu tốn CPU 
+            vTaskDelay(pdMS_TO_TICKS(1000));
+    
+        ◦   Task chuyển sang Blocked 
+    
+        ◦   Không tiêu tốn CPU 
 
 *    **VD2: Chờ dữ liệu UART (Queue)**
 
-        xQueueReceive(uartQueue, &rxData, portMAX_DELAY);
-
-    ◦   Task Blocked cho đến khi
-
-        ISR UART nhận dữ liệu
-
-        Gọi xQueueSendFromISR()
-
-    ◦   Task Blocked → Ready → Running    
+            xQueueReceive(uartQueue, &rxData, portMAX_DELAY);
+    
+        ◦   Task Blocked cho đến khi
+    
+            ISR UART nhận dữ liệu
+    
+            Gọi xQueueSendFromISR()
+    
+        ◦   Task Blocked → Ready → Running    
   
 ##### **3.2.4.Suspended:**
 
 *    **Đặc điểm:**
   
-    ◦   Task bị tạm dừng chủ động bởi code ứng dụng (thường do task khác hoặc chính nó gọi `vTaskSuspend()`.
-
-    ◦   Không chờ sự kiện gì cả → không tự động tỉnh lại (khác với Blocked).
-
-    ◦   Chỉ trở lại Ready khi có lời gọi rõ ràng: `vTaskResume()` hoặc `xTaskResumeFromISR()`.
-
-    ◦   Thường dùng để: tạm dừng task khi debug, chuyển sang chế độ low-power, hoặc điều khiển runtime
-
-        Đang delay: vTaskDelay() hoặc vTaskDelayUntil().
-
-        Đang chờ nhận dữ liệu từ queue: xQueueReceive() (với timeout ≠ 0).
-
-        Đang chờ semaphore/mutex: xSemaphoreTake().
-
-        Đang chờ bit event group: xEventGroupWaitBits().
-
-    ◦   Task Blocked không tiêu tốn CPU
-
-    ◦   Khi sự kiện xảy ra (timeout hết), task tự động chuyển từ Blocked->Ready
+        ◦   Task bị tạm dừng chủ động bởi code ứng dụng (thường do task khác hoặc chính nó gọi `vTaskSuspend()`.
+    
+        ◦   Không chờ sự kiện gì cả → không tự động tỉnh lại (khác với Blocked).
+    
+        ◦   Chỉ trở lại Ready khi có lời gọi rõ ràng: `vTaskResume()` hoặc `xTaskResumeFromISR()`.
+    
+        ◦   Thường dùng để: tạm dừng task khi debug, chuyển sang chế độ low-power, hoặc điều khiển runtime
+    
+            Đang delay: vTaskDelay() hoặc vTaskDelayUntil().
+    
+            Đang chờ nhận dữ liệu từ queue: xQueueReceive() (với timeout ≠ 0).
+    
+            Đang chờ semaphore/mutex: xSemaphoreTake().
+    
+            Đang chờ bit event group: xEventGroupWaitBits().
+    
+        ◦   Task Blocked không tiêu tốn CPU
+    
+        ◦   Khi sự kiện xảy ra (timeout hết), task tự động chuyển từ Blocked->Ready
 
 *    **VD1: Tạm dùng task ADC**
 
-        ADC task:Không delay, timeout, tự wake
-
-    ◦   Chỉ wakeup khi:
-
-        vTaskResume(adcTaskHandle);
+            ADC task:Không delay, timeout, tự wake
+    
+        ◦   Chỉ wakeup khi:
+    
+            vTaskResume(adcTaskHandle);
 
     
 #### **3.3. State Transition Diagram**
