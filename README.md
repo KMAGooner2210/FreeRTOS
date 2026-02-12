@@ -1,1056 +1,1000 @@
-# CHƯƠNG 4: TASK MANAGEMENT 
+
+# CHƯƠNG 4: TASKS MANAGEMENT 
 <details>
-    <summary><strong>BÀI 1: TASK INTRODUCTION, FUNCTIONS & STATES</strong></summary>
+    <summary><strong>BÀI 1: TASK FUNCTION, TASK CREATION AND STACK DEPTH</strong></summary>
 
-## **BÀI 1: TASK INTRODUCTION, FUNCTIONS & STATES**
+## **BÀI 1: TASK FUNCTION, TASK CREATION AND STACK DEPTH**
 
-### **I. Introduction**
+### **I.  Task function**
+#### **1.1. Khái niệm**
 
-*   Trong FreeRTOS, task (tác vụ) là đơn vị thực thi cơ bản nhất – tương đương với một luồng thực thi (thread) trong hệ điều hành thông thường
+*   Hàm task là hàm C thực thi công việc độc lập của một tác vụ.
+ 
+* Mỗi task được xem như một luồng thực thi (thread) riêng biệt, được kernel quản lý và lập lịch (scheduling)
 
-*   Vai trò task:
+* Khi một task  được tạo ra, hệ điều hành sẽ cấp phát cho nó:
 
-    ◦   Mỗi task có code riêng (hàm task), stack riêng và ngữ cảnh riêng.
-
-    ◦   Kernel phân bổ CPU time, chọn task chạy dựa trên ưu tiên và trạng thái.
-
-    ◦   Cho phép đa nhiệm đồng thời trên single-core bằng context switch.
-
-### **II. Super loop**
-
-#### **2.1. Định nghĩa**
-
-*   Super loop là một vòng lặp vô hạn trong main(), liên tục thực hiện các chức năng theo thứ tự cố định.
-
-*   Không có khái niệm task, priority, hay preemption – mọi thứ chạy tuần tự (sequential).
-
-*   Thời gian thực hiện phụ thuộc vào:
-
-    ◦   Thứ tự code trong loop.
-
-    ◦   Thời gian mỗi chức năng mất (có thể dùng delay để "chờ").
-
-    ◦   Polling (liên tục kiểm tra điều kiện, ví dụ đọc button hoặc sensor).
-
-#### **2.2. Nguyên lý cơ bản**
-
-*   Khởi tạo hardware (GPIO, UART, ADC...) một lần ở `main()`.
-
-*   Sau đó vào vòng lặp vô hạn: thực hiện công việc 1 → công việc 2 → ... → công việc n → quay lại công việc 1.
-
-*   Để tránh một công việc block toàn bộ hệ thống, thường dùng non-blocking (không delay lâu) hoặc state machine cho từng chức năng.
-
-#### **2.3. Cấu trúc**
-
-
-        int main(void)
-        {
-            // 1. Khởi tạo hardware (chạy 1 lần)
-            System_Init();      // Clock, peripheral...
-            GPIO_Init();
-            UART_Init();
-            // ...
-
-            while(1)  // Super loop – vòng lặp vô hạn
-            {
-                // 2. Thực hiện các công việc tuần tự
-                Task1();  // Ví dụ: đọc sensor
-                Task2();  // Ví dụ: xử lý dữ liệu
-                Task3();  // Ví dụ: gửi UART
-                Task4();  // Ví dụ: blink LED
-
-                // Có thể thêm delay nhỏ ở cuối loop để giảm tốn CPU
-                // Delay_ms(1);
-            }
-        }
-
-#### **2.4. Nhược điểm**
-
-*   Không đảm bảo real-time
-
-    ◦   Nếu một công việc mất thời gian lâu (ví dụ Task2 xử lý dữ liệu nặng), các công việc sau (Task3, Task4) bị delay → miss deadline.
-
-*   Khó mở rộng
-
-    ◦   Khi thêm chức năng mới → loop dài hơn → thời gian cycle tăng → tất cả chức năng chậm lại.
-
-    ◦   Phải dùng state machine phức tạp để tránh blocking
-
-*   Xử lý ngắt kém
-
-    ◦   Ngắt (ISR) có thể xử lý nhanh, nhưng dữ liệu từ ngắt thường phải buffer và xử lý trong loop → nếu loop bận → mất dữ liệu.
-
-*   Không có priority
-
-    ◦   Không phân biệt công việc quan trọng và không quan trọng
-
-    ◦   Không preemption → công việc thấp không thể bị chiếm bởi công việc cao ưu tiên.
-
-### **III. Task states**
-
-#### **3.1. Định nghĩa**
-
-*   FreeRTOS định nghĩa 4 trạng thái chính cho mọi task (đây là cách kernel theo dõi và quản lý task):
-
-    ◦   Running
-
-    ◦   Ready
-
-    ◦   Blocked
-
-    ◦   Suspended
-
-#### **3.2. Đặc điểm**
-
-##### **3.2.1.Running**
-
-*    **Đặc điểm:**
-
-        ◦   Task đang chiếm quyền điều khiển CPU và code của nó đang được thực thi.
-    
-        ◦   Trên hệ thống single-core (hầu hết MCU nhúng): chỉ có đúng 1 task ở trạng thái Running tại một thời điểm.
-    
-        ◦   Task running có thể:
-    
-            Tự nguyện nhường CPU (gọi vTaskDelay(), taskYIELD(), hoặc blocking API như queue receive)
-    
-            Bị preempt (bị cướp CPU) bởi task có ưu tiên cao hơn hoặc bởi ngắt (ISR).
-
-*    **VD:**
-
-        void vLedTask(void *pvParameters)
-        {
-            while(1)
-            {
-                GPIOC->ODR ^= (1 << 13); // LED ON/OFF
-                vTaskDelay(pdMS_TO_TICKS(500));
-            }
-        }
-
-        ◦   Khi CPU đang thực thi dòng `GPIOC->ODR ^= ...`, vLedTask ở trạng thái Running
-    
-        ◦   Nếu có task khác priority cao hơn: LED task bị preempt, chuyển về Ready  
+    ◦   **Stack riêng** để lưu biến cục bộ và context khi chạy
+   
+    ◦   **Task Control Block (TCB)** để lưu thông tin quản lý (priority, state, stack pointer, ID, …)
   
-##### **3.2.2.Ready**
+    ◦   **Context riêng**, cho phép task có thể bị tạm dừng và tiếp tục mà không mất trạng thái
 
-*    **Đặc điểm:**
+#### **1.2. Đặc điểm**
 
-        ◦   Task đã sẵn sàng để chạy (không bị chặn, không bị tạm dừng), nhưng chưa được chọn để chạy vì hiện tại có task ưu tiên cao hơn (hoặc bằng) đang Running.
+*   **Task thường phải có vòng lặp vô hạn**
+
+    ◦   Một task trong FreeRTOS **không được kết thúc tự nhiên bằng cách `return`**, bởi vì kernel giả định task sẽ tồn tại trong suốt vòng đời hệ thống.
     
-        ◦   Các task Ready được kernel lưu trong ready list (danh sách sẵn sàng), được sắp xếp theo ưu tiên (priority descending).
-    
-        ◦   Scheduler luôn chọn task có ưu tiên cao nhất trong ready list để đưa vào Running → đây là cơ sở của preemptive priority-based scheduling.
-
-*    **VD:**
-
-        xTaskCreate(vLedTask,  "LED", 128, NULL, 1, NULL);
-        xTaskCreate(vUartTask, "UART",256, NULL, 1, NULL);
-
-        ◦   Cả hai: Không delay, block -> Ready
-        
-        ◦   Scheduler:  Chia CPU theo time slicing (nếu `configUSE_TIME_SLICING = 1`)
-    
-##### **3.2.3.Blocked**
-
-*    **Đặc điểm:**
-  
-        ◦   Task đang chờ một sự kiện (event) và không thể chạy ngay được.
-    
-        ◦   Các trường hợp phổ biến gây Blocked:
-    
-            Đang delay: vTaskDelay() hoặc vTaskDelayUntil().
-    
-            Đang chờ nhận dữ liệu từ queue: xQueueReceive() (với timeout ≠ 0).
-    
-            Đang chờ semaphore/mutex: xSemaphoreTake().
-    
-            Đang chờ bit event group: xEventGroupWaitBits().
-    
-        ◦   Task Blocked không tiêu tốn CPU
-    
-        ◦   Khi sự kiện xảy ra (timeout hết), task tự động chuyển từ Blocked->Ready   
-
-*    **VD1: Delay**
-
-            vTaskDelay(pdMS_TO_TICKS(1000));
-    
-        ◦   Task chuyển sang Blocked 
-    
-        ◦   Không tiêu tốn CPU 
-
-*    **VD2: Chờ dữ liệu UART (Queue)**
-
-            xQueueReceive(uartQueue, &rxData, portMAX_DELAY);
-    
-        ◦   Task Blocked cho đến khi
-    
-            ISR UART nhận dữ liệu
-    
-            Gọi xQueueSendFromISR()
-    
-        ◦   Task Blocked → Ready → Running    
-  
-##### **3.2.4.Suspended:**
-
-*    **Đặc điểm:**
-  
-        ◦   Task bị tạm dừng chủ động bởi code ứng dụng (thường do task khác hoặc chính nó gọi `vTaskSuspend()`.
-    
-        ◦   Không chờ sự kiện gì cả → không tự động tỉnh lại (khác với Blocked).
-    
-        ◦   Chỉ trở lại Ready khi có lời gọi rõ ràng: `vTaskResume()` hoặc `xTaskResumeFromISR()`.
-    
-        ◦   Thường dùng để: tạm dừng task khi debug, chuyển sang chế độ low-power, hoặc điều khiển runtime
-    
-            Đang delay: vTaskDelay() hoặc vTaskDelayUntil().
-    
-            Đang chờ nhận dữ liệu từ queue: xQueueReceive() (với timeout ≠ 0).
-    
-            Đang chờ semaphore/mutex: xSemaphoreTake().
-    
-            Đang chờ bit event group: xEventGroupWaitBits().
-    
-        ◦   Task Blocked không tiêu tốn CPU
-    
-        ◦   Khi sự kiện xảy ra (timeout hết), task tự động chuyển từ Blocked->Ready
-
-*    **VD1: Tạm dùng task ADC**
-
-            ADC task:Không delay, timeout, tự wake
-    
-        ◦   Chỉ wakeup khi:
-    
-            vTaskResume(adcTaskHandle);
-
-    
-#### **3.3. State Transition Diagram**
-
-<img width="502" height="536" alt="Image" src="https://github.com/user-attachments/assets/da3f7ad0-45f0-41ce-91a3-615e2bc38b67" />
-
-*   **Created -> Ready:** Sau khi `xTaskCreate()` thành công
-
-*   **Ready -> Running:** Scheduler chọn task có ưu tiên cao nhất trong ready list
-
-*   **Running -> Ready:** Bị preempt bởi task ưu tiên cao hơn, hoặc gọi `taskYIELD()`
-
-*   **Running -> Blocked:** Gọi blocking API
-
-*   **Blocked -> Ready:** Sự kiện xảy ra hoặc timeout hết
-
-*   **Running -> Suspended:** Gọi `vTaskSuspend()` (có thể từ task khác hoặc chính nó)
-
-*   **Suspended -> Ready:** Gọi `vTaskResume()`
-
-*   **Bất kỳ trạng thái nào -> Deleted:** Gọi `vTaskDelete()` hoặc task return
-
-     </details> 
-<details>
-    <summary><strong>BÀI 2: TASK CREATION, PRIORITES, SCHEDULING</strong></summary>
-
-## **BÀI 2: TASK CREATION, PRIORITES, SCHEDULING**
-
-### **I. Task Creation**
-
-#### **1.1. Định nghĩa**
-
-*   `xTaskCreate()` là API cốt lõi dùng để:
-
-    ◦   Tạo task mới
-
-    ◦   Cấp phát stack
-
-    ◦   Khởi tạo TCB (Task Control Block)
-
-    ◦   Đưa task vào hệ thống scheduler
-
-#### **1.2. Prototype**
-
-        BaseType_t xTaskCreate(
-            TaskFunction_t pvTaskCode,
-            const char * const pcName,
-            uint16_t usStackDepth,
-            void *pvParameters,
-            UBaseType_t uxPriority,
-            TaskHandle_t *pxCreatedTask
-        );
-
-*   `pvTaskCode`
-
-    ◦   Con trỏ tới hàm task
-
-    ◦   Task là hàm C không bao giờ kết thúc
-
-    ◦   Thường chứa vòng lặp `f`or(;;)`
-
-*   `pcName` 
-
-    ◦   Tên mô tả task
-
-    ◦   Độ dài tối đa: `configMAX_TASK_NAME_LEN`
-
-    ◦   Chuỗi dài hơn sẽ bị cắt tự động
-
-*   `usStackDepth`
-
-    ◦   Kích thước stack của task
-
-    ◦   Đơn vị là word, không phải byte
-
-*   `pvParameters` 
-
-    ◦   Tham số truyền vào task
-
-    ◦   Kiểu void*
-
-    ◦   Dùng để: Truyền cấu hình, ID, struct
-
-*   `uxPriority` 
-
-    ◦   Mức ưu tiên của task
-
-    ◦   Phạm vi: 0 - `configMAX_PRIORITIES - 1`
-
-*   `pxCreatedTask` 
-
-    ◦   Con trỏ nhận handle của task
-
-    ◦   Dùng để: Thay đổi priority, delete task, suspend/resume
-
-    ◦   Không cần dùng → set NULL
-
-#### **1.3. Giá trị trả về**
-
-*   **pdPASS:** Tạo task thành công 
-
-*   **pdFAIL:** Không đủ heap để cấp phát stack & TCB
-
-        void vTaskLedToggle(void *pvParameters)
-        {
-            uint16_t pin = (uint16_t)pvParameters;          // Ép kiểu tham số
-
-            for(;;)
-            {
-                GPIOC->ODR ^= pin;                              // Toggle pin cụ thể
-                vTaskDelay(pdMS_TO_TICKS(300 + pin * 100));     // Delay khác nhau
-            }
-        }
-
-### **II. Priorities and Scheduling Mechanisms**
-
-#### **2.1. Mô hình lập lịch của FreeRTOS**
-
-*   FreeRTOS sử dụng fixed-priority preemptive scheduling, trong đó:
-
-    ◦   Mỗi task được gán một mức ưu tiên cố định tại thời điểm tạo
-
-    ◦   Scheduler luôn chọn task Ready có priority cao nhất để thực thi
-
-    ◦   Khi một task ưu tiên cao hơn chuyển sang trạng thái Ready, nó sẽ ngắt (preempt) ngay lập tức task đang Running có priority thấp hơn
-
-#### **2.2. Ready List – Cấu trúc dữ liệu lập lịch**
-
-##### **2.2.1. Khái niệm**
-
-*   Ready list là tập hợp các task đang ở trạng thái Ready (sẵn sàng chạy)
-
-*   Kernel duy trì một Ready list cho mỗi mức priority
-
-*   Tổng số mức priority được xác định bởi: `configMAX_PRIORITIES`
-
-            configMAX_PRIORITIES = 5
-            Priority: 0 1 2 3 4
-
-##### **2.2.2. Cách FreeRTOS tổ chức Ready list**
-
-*   Tùy cấu hình, FreeRTOS sử dụng:
-
-    ◦   Array of linked lists
-
-        Mỗi priority → một danh sách liên kết các task
-
-    ◦   Priority bitmap
-
-        Một bitmask cho biết priority nào hiện đang có task Ready
-
-        bitmap = 0b001011 (Có task Ready tại priority: 0, 1, 3)
-
-
-#### **2.3. Cơ chế Preemption**
-
-##### **2.3.1. Khái niệm**
-
-*   Preemption xảy ra ngay lập tức khi:
-
-    ◦   Một task có priority cao hơn  (Được unblocked/resume)
-
-    ◦   ISR đánh thức task priority cao
-
-*   Điều kiện:
-
-        configUSE_PREEMPTION == 1
-
-##### **2.3.2. Đặc điểm**
-
-*   Không cần chờ tick interrupt
-
-*   Context switch xảy ra:
-
-    ◦   Ngay trong API call
-
-    ◦   Hoặc ngay khi ISR kết thúc (`portYIELD_FROM_ISR()`)
-
-##### **2.3.3. VD**
-
-*   **USART ISR đánh thức task**
-
-        xQueueSendFromISR(uartQueue, &data, &xHigherPriorityTaskWoken);
-        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-
-*   Nếu:
-
-    ◦   TaskUART priority = 3
-
-    ◦   Task đang chạy priority = 1
-
-    ◦   Context switch ngay khi thoát ISR, không cần đợi tick
-    
-#### **2.4. Time Slicing**
-
-##### **2.4.1. Điều kiện kích hoạt**
-
-*   Time-slicing chỉ áp dụng cho các task cùng priority, khi:
-
-        configUSE_TIME_SLICING == 1
-
-##### **2.4.2. Cơ chế hoạt động**
-
-*   Mỗi tick interrupt:
-
-    ◦   Scheduler xoay vòng các task Ready cùng priority
-
-    ◦   Task hiện tại bị đưa về cuối Ready list
-
-    ◦   Task tiếp theo được chạy
-
-*   Time-slicing không có khi:
-
-    ◦   `configUSE_TIME_SLICING = 0`
-
-    ◦   Hoặc chỉ có một task tại mức priority đó
-
-    ◦   Task sẽ chạy liên tục cho đến khi: `Block`, `Yield`, preempt bởi task priority cao hơn
-
-#### **2.5. VD**
-
-*    Hai task cùng priority = 2
-  
-        xTaskCreate(TaskA, "A", 256, NULL, 2, NULL);
-        xTaskCreate(TaskB, "B", 256, NULL, 2, NULL);
-
-*    Nếu:
-
-            #define configUSE_TIME_SLICING 1
-
-*    Mỗi tick:
-
-            Tick 1: A
-            Tick 2: B
-            Tick 3: A
-            Tick 4: B
-
-
-
-### **III. Time Measurement and Tick Interrupt**
-
-#### **3.1. Khái niệm**
-
-*   FreeRTOS không đo thời gian bằng timer độc lập cho từng task, mà sử dụng một nguồn thời gian toàn cục gọi là system tick.
-
-    ◦   System tick được tạo bởi tick interrupt
-
-    ◦   Mỗi tick đại diện cho một đơn vị thời gian nhỏ nhất mà kernel có thể quản lý
-
-*   Mọi khái niệm liên quan đến: delay, timeout, sleep, scheduling đều quy đổi quy đổi về số tick
-
-#### **3.2. Tick Interrupt**
-
-*   **SysTick (Cortex-M):**
-
-    ◦   SysTick là timer 24-bit tích hợp trong Cortex-M
-
-    ◦   Được thiết kế riêng để: tạo interrupt định kỳ, phục vụ hệ điều hành thời gian thực
-
-        SysTick_Config(SystemCoreClock / configTICK_RATE_HZ);
-
-
-*   **vai trò: Mỗi lần xảy ra tick interrupt, FreeRTOS sẽ:**
-
-    ◦   Tăng bộ đếm thời gian toàn cục
-
-        xTickCount++;
-
-    ◦   Cập nhật trạng thái các task bị Blocked
-
-        Giảm timeout
-
-        Nếu timeout = 0 → chuyển sang Ready
-
-    ◦   Kiểm tra điều kiện lập lịch
-
-        Có task Ready priority cao hơn không
-
-        Có cần time-slicing không        
-
-    ◦   Yêu cầu context switch nếu cần
-
-        Thông qua PendSV
-
-#### **3.3. Tần số tick**
-
-*   **Định nghĩa:**
-
-        #define configTICK_RATE_HZ   1000
-
-    ◦   Xác định số tick trong 1 giây
-
-    ◦   Là thông số quan trọng nhất liên quan đến thời gian
-
-*   **Chu kỳ tick:**
-
-        #define portTICK_PERIOD_MS (1000 / configTICK_RATE_HZ)
-        
-    | configTICK_RATE_HZ | portTICK_PERIOD_MS | Ghi chú |
-    |--------------------|--------------------|--------|
-    | 100                | 10 ms              | Low-power, delay thô |
-    | 1000               | 1 ms               | Khuyến nghị cho hệ real-time |
-    | 10000              | 0.1 ms             | Độ chính xác cao, overhead lớn |
-
-
-    ◦   Độ phân giải thời gian = chu kỳ tick
-
-#### **3.4. Tick và cơ chế delay / timeout**
-
-*   **Delay theo tick:**
-
-        vTaskDelay( xTicksToDelay );
-
-    ◦   Task bị đưa vào trạng thái Blocked
-
-    ◦   Kernel ghi nhận:
-
-        wake_up_tick = xTickCount + xTicksToDelay;
-
-    ◦   Mỗi tick: So sánh xTickCount, nếu đến thời điểm → task chuyển Ready
-
-*   **Độ chính xác của delay:**
-
-    ◦   vTaskDelay() không đảm bảo chính xác tuyệt đối
-
-    ◦   Sai số có thể lên tới: ± 1 tick
-
-#### **3.5. Chuyển đổi ms ↔ tick**
-
-        pdMS_TO_TICKS( ms )
-
-*   **VD:**
-
-        vTaskDelay( pdMS_TO_TICKS(100) );  // Delay 100 ms
-
-*   Với `configTICK_RATE_HZ = 1000`:
-
-        100 ms → 100 tick
-
-#### **3.6. Lưu ý**
-
-*   Tần số tick càng cao:
-
-    ◦   SysTick interrupt càng nhiều
-
-    ◦   Context switch xảy ra thường xuyên hơn
-
-    ◦   CPU mất thời gian vào:
-
-        ISR
-
-        Scheduler
-
-        PendSV    
-
-*   Tick quá cao có thể:
-
-    ◦   Giảm thời gian chạy task thật
-
-    ◦   Tăng tiêu thụ năng lượng
-
-    ◦   Gây jitter nếu ISR dài
-    
-     </details> 
-  <details>
-    <summary><strong>BÀI 3: TASK DELAY & IDLE TASK</strong></summary>
-
-## **BÀI 3: TASK DELAY & IDLE TASK**
-
-### **I. Task Delay**
-
-#### **1.1. vTaskDelay**
-
-*   `vTaskDelay()` là API dùng để đưa task vào trạng thái Blocked trong một khoảng thời gian tương đối, tính từ thời điểm task gọi hàm
-
-*   **Prototype:**
-
-        void vTaskDelay(TickType_t xTicksToDelay);
-
-*   **Tham số: xTicksToDelay**
-
-    ◦   Số tick task bị block
-
-    ◦   Đơn vị: tick hệ thống
-
-    ◦   Thường dùng macro quy đổi:
-
-        vTaskDelay(pdMS_TO_TICKS(100));
-        
-    ◦   Lưu ý:
-
-        vTaskDelay(0); -> Task nhường CPU (yield) nhưng không block   
-
-*   **Cơ chế:**
-
-    ◦   Khi task gọi:   `vTaskDelay(xTicksToDelay);`
-
-    ◦   FreeRTOS sẽ:
-
-        Lấy tick count hiện tại 
-
-        Tính: `WakeTime = CurrentTick + xTicksToDelay`
-
-        Đưa task vào Blocked list 
-
-        Khi tick count đạt WakeTime -> Task chuyển sang ready      
-
-*   **Chu kỳ thực tế:**
-
-        for(;;)
-        {
-            DoWork();
-            vTaskDelay(pdMS_TO_TICKS(100));
-        }
-
-    ◦   Chu kỳ thực tế:
-
-        Chu kỳ = Thời gian xử lý + Thời gian delay
-
-    ◦   VD:
-
-        Xử lý 7 ms -> chu kỳ = 107 ms
-
-*    **VD:**
-  
-        void vTaskLED(void *pvParameters)
-        {
-            for (;;)
-            {
-                GPIOC->BRR  = GPIO_Pin_13;   // LED ON
-                vTaskDelay(pdMS_TO_TICKS(100));
-        
-                GPIOC->BSRR = GPIO_Pin_13;   // LED OFF
-                vTaskDelay(pdMS_TO_TICKS(100));
-            }
-        }
-
-#### **1.2. vTaskDelayUntil**
-
-##### **1.2.1. Khái niệm**
-
-*   `vTaskDelayUntil()` là API dùng để tạo task chạy định kỳ với chu kỳ chính xác, bằng cách delay task đến một mốc thời gian tuyệt đối trong tương lai, thay vì delay tương đối kể từ thời điểm gọi hàm 
-
-*   **FreeRTOS sử dụng:**
-
-    ◦   **System Tick:** bộ đếm tăng đều theo `configTICK_RATE_HZ`
-
-    ◦   **Tick Count:** biến toàn cụ đếm số tick từ khi scheduler start
-
-    ◦   Mọi cơ chế delay đều dựa trên tick count, không dựa trên thời gian thực tuyệt đối (RTC)
-        
-##### **1.2.2. Prototype**
-
-        void vTaskDelayUntil( TickType_t *pxPreviousWakeTime,
-                              TickType_t xTimeIncrement );
-
-
-*   `pxPreviousWakeTime`
-
-    ◦   Con trỏ tới biến lưu thời điểm task wake gần nhất
-
-    ◦   Được dùng làm mốc thời gian tham chiếu tuyệt đối
-
-    ◦   Kernel tự cập nhật giá trị này sau mỗi chu kỳ
-
-    ◦   Khởi tạo một lần duy nhất, trước `for(;;)` của task
-
-        xLastWakeTime = xTaskGetTickCount();
-
-*   `xTimeIncrement` 
-
-    ◦   Chu kỳ task
-
-    ◦   Đơn vị: Tick
-
-    ◦   Thường quy đổi từ ms:
-
-        pdMS_TO_TICKS(period_ms)
-
-*    **VD:**
-
-            void vTaskADC(void *pvParameters)
-            {
-                TickType_t xLastWakeTime;
-                const TickType_t period = pdMS_TO_TICKS(100);
-            
-                xLastWakeTime = xTaskGetTickCount();
-            
-                for (;;)
-                {
-                    Read_ADC();
-                    Process_ADC_Data();
-            
-                    vTaskDelayUntil(&xLastWakeTime, period);
-                }
-            }
-
-##### **1.2.3. Cơ chế**
-
-*   Giả sử:
-
-    ◦   `xLastWakeTime = T0`
-
-    ◦   `xTimeIncrement = P`
-
-*   Mỗi lần gọi
-
-        vTaskDelayUntil(&xLastWakeTime, P);
-
-*   FreeRTOS thực hiện:
-
-    ◦   1. Tính thời điểm wake tiếp theo 
-
-        NextWakeTime = xLastWakeTime + P
-
-    ◦   2. So sánh với tick hiện tại
-
-        Nếu CurrentTick < NextWakeTime -> Task bị đưa vào Blocked state
-
-        Nếu CurrentTick >= NextWakeTime -> Task không bị block, chạy ngay
-
-    ◦   3. Cập nhật
-
-        xLastWakeTime = NextWakeTime
-
-*   Mốc thời gian không bao giờ reset theo thời điểm gọi hàm
-
-### **II. Idle Task và Idle Hook**
-
-#### **2.1. Idle Task**
+    ◦   Do đó, cấu trúc chuẩn của một task luôn là:
+		 
+			 void TaskFunction(void *pvParameters)
+			 {
+			 	 for(;;)
+				 {
+				 // Do tasks
+				 }
+			  }
+				 
+*   **Tham số truyền vào có kiểu `void*`**
+
+    ◦   Task function luôn nhận tham số đầu vào dạng:
+				
+				void *pvParameters
+			
+    ◦   VD: Task có thể nhận struct thông qua con trỏ `void*` 
+				
+				typedef struct {
+					int id;
+					int period_ms;
+					} TaskConfig;
+					      
+*   **Task return sẽ bị kernel tự xóa**
+
+    ◦   Nếu task kết thúc bằng `return`, FreeRTOS có thể tự động gọi:
+				
+				vTaskDelete(NULL);
+
+    ◦   Điều này chỉ xảy ra khi:
+
+				#define configUSE_TASK_DELETE 	1
+
+#### **1.3.VD**
+
+				void vSensorTask(void *pvParameters)
+				{
+					SensorConfig_t *config = (SensorConfig_t *)pvParameters;
+					for(;;)
+					{
+						uint16_t value = ReadSensor(config->pin);
+						ProcessData(value);
+						vTaskDelay(pdMS_TO_TICKS(100));
+					}
+				 }
+
+### **II. Task creation**
+
+#### **2.1. Dynamic allocation**
 
 ##### **2.1.1. Khái niệm**
 
-*   Idle Task là task được kernel FreeRTOS tự động tạo khi scheduler start.
+*   Trong FreeRTOS, **Dynamic Allocation** là cơ chế tạo task mà hệ điều hành sẽ tự động cấp phát bộ nhớ từ **heap** tại thời điểm runtime.
 
-*   Nó đảm bảo rằng luôn có ít nhất một task ở trạng thái Ready, để scheduler không bao giờ rơi vào trạng thái không có gì để chạy.
+*   Khi gọi `xTaskCreate()`, kernel sẽ cấp phát:
 
-##### **2.1.2. Đặc điểm**
+    ◦   **TCB (Task Control Block)**: cấu trúc quản lý task
 
-*   Được kernel tự tạo, người dùng không cần và không được tạo
+    ◦   **Stack riêng**: vùng bộ nhớ lưu biến cục bộ và context của task.
 
-*   Priority: `Priority = 0`
+##### **2.1.2. Cú pháp**
 
-*   Luôn tồn tại trong suốt vòng đời hệ thống
-
-*   Chỉ chạy khi không có task Ready nào có priority > 0
-
-*   Không thể:
-
-    ◦   Xóa `vTaskDelete`
-
-    ◦   Suspend `vTaskSuspend`
-
-*   Idle task luôn phải được phép chạy, nếu không hệ thống sẽ lỗi.
+	CBaseType_t xTaskCreate(
+	    TaskFunction_t pvTaskCode,
+	    const char * const pcName,
+	    uint16_t usStackDepth,
+	    void *pvParameters,
+	    UBaseType_t uxPriority,
+	    TaskHandle_t *pxCreatedTask
+	);
 
 
-#### **2.2. Vai trò**
+*   `pvTaskCode` – Con trỏ tới hàm task
 
-*   Thu hồi tài nguyên task đã bị delete
+    ◦   void vTaskFunction(void *pvParameters);
 
-    ◦   Khi gọi:   `vTaskDelete(taskHandle);`
+			void vSensorTask(void *pvParameters)
+			{
+			    for(;;)
+			    {
+			        // Code xử lý cảm biến
+			    }
+			}
 
-        Task không bị xóa ngay lập tức 
+*   ``pcName`` – Tên task
 
-        Tài nguyên chỉ được thu hồi khi Idle Task chạy
+    ◦   const char * const pcName
 
-*   Đảm bảo scheduler luôn có task để chạy
+    ◦   Tên này dùng để hiển thị trong debugger, trace task
+    
+			"Sensor"
+			"Communication"
+			"MotorCtrl"
 
-    ◦   Scheduler luôn chọn task Ready có priority cao nhất
+*   ``usStackDepth`` – Kích thước stack của task
 
-    ◦   Nếu không có task Ready:
+    ◦   uint16_t usStackDepth
 
-        Idle task sẽ ready
+    ◦   Đây là số lượng **word**, không phải byte.
 
-        CPU không bị idle vô định nghĩa   
+    ◦   Stack = `usStackDepth * 4`
+    
+			256 word → 1024 bytes stack
 
-#### **2.2. Idle Hook**
+*   ``pvParameters`` – Tham số truyền vào task
+
+    ◦   void *pvParameters
+
+    ◦   Cho phép truyền dữ liệu cấu hình vào task, ví dụ: Struct config, ID task, Handle peripheral
+
+    ◦   Ví dụ:
+        
+			xTaskCreate(vSensorTask, "Sensor", 256, &sensorConfig, 3, NULL);
+
+    ◦   Trong task:
+        
+			SensorConfig_t *cfg = (SensorConfig_t*) pvParameters;
+
+    ◦   Nếu không cần tham số → truyền `NULL`.
+
+*   ``uxPriority`` – Độ ưu tiên của task
+
+    ◦   UBaseType_t uxPriority
+
+    ◦   FreeRTOS scheduling dựa trên priority:
+			
+			Priority càng cao → task càng được ưu tiên chạy
+			
+			Task priority thấp sẽ chạy khi CPU rảnh
+			
+*   ``pxCreatedTask`` – Task Handle (định danh task)
+
+    ◦   TaskHandle_t *pxCreatedTask
+
+    ◦   Handle là ID để quản lý task sau này:
+			
+			Suspend/Resume
+			
+			Delete
+			
+			Notify
+
+			Change priority
+			
+     ◦   Ví dụ:
+
+			TaskHandle_t xHandle;
+			xTaskCreate(..., &xHandle);
+ 
+ ##### **2.1.3. Giá trị trả về**
+ 
+* 	`pdPASS` → tạo task thành công
+
+* 	`errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY` → không đủ heap để cấp phát stack + TCB
+
+ ##### **2.1.4. VD**
+
+			TaskHandle_t xHandle;
+			if (xTaskCreate(
+					vSensorTask,				// Hàm task
+					"Sensor",						// Tên debug
+					256,								// Stack size (word)
+					&sensorConfig,			// Tham số truyền vào 
+					3,									// Priority
+					&xHandle						// Handle task
+				) != pdPASS)
+			{
+					// Xử lý lỗi: heap không đủ
+			}
+			
+#### **2.2. Static allocation**
 
 ##### **2.2.1. Khái niệm**
 
-*   Idle Hook là một callback function do người dùng định nghĩa, được kernel gọi mỗi lần Idle Task chạy.
+*   Trong FreeRTOS, **Static Allocation** là cơ chế tạo task mà **người lập trình phải cung cấp trước bộ nhớ** cho task, thay vì để kernel tự cấp phát từ heap.
 
-        void vApplicationIdleHook(void);
+*   Khi tạo task theo kiểu static, người dùng phải chuẩn bị sẵn:
 
-    ◦   Kernel sẽ gọi hàm này bên trong vòng lặp của Idle Task
+    ◦   **Stack buffer** (mảng stack riêng của task)
 
-##### **2.2.2. Điều kiện**
+    ◦   **TCB buffer** (`StaticTask_t`) để kernel lưu thông tin quản lý task
 
-*   Idle Hook chỉ được gọi khi:
+##### **2.2.2. Cú pháp**
 
-    ◦   `configUSE_IDLE_HOOK == 1` trong `FreeRTOSConfig.h`
+		TaskHandle_t xTaskCreateStatic(
+		    TaskFunction_t pvTaskCode,
+		    const char * const pcName,
+		    uint32_t ulStackDepth,
+		    void *pvParameters,
+		    UBaseType_t uxPriority,
+		    StackType_t *puxStackBuffer,
+		    StaticTask_t *pxTaskBuffer
+		);
 
-    ◦    Scheduler đang chạy
 
-    ◦    Không có task Ready nào khác
 
+*   `pvTaskCode` – Hàm thực thi task
+
+    ◦   `TaskFunction_t pvTaskCode`
+
+
+			void vTaskFunction(void *pvParameters);
+
+
+*   ``pcName`` – Tên task
+
+    ◦   `const char * const pcName`
+
+    ◦   Tên này dùng để hiển thị trong debugger, trace task
     
+			"Sensor"
+			"Communication"
+			"MotorCtrl"
+
+*   ``usStackDepth`` – Kích thước stack của task
+
+    ◦   `uint32_t ulStackDepth`
+
+    ◦   Đây là số lượng **word**, không phải byte.
+
+    ◦   Stack = `usStackDepth * 4`
+    
+			256 word → 1024 bytes stack
+
+*   ``pvParameters`` – Tham số truyền vào task
+
+    ◦   `void *pvParameters`
+
+    ◦   Cho phép truyền dữ liệu cấu hình vào task, ví dụ: Struct config, ID task, Handle peripheral
+
+    ◦   Ví dụ:
+        
+			xTaskCreate(vSensorTask, "Sensor", 256, &sensorConfig, 3, NULL);
+
+    ◦   Trong task:
+        
+			SensorConfig_t *cfg = (SensorConfig_t*) pvParameters;
+
+    ◦   Nếu không cần tham số → truyền `NULL`.
+
+*   ``uxPriority`` – Độ ưu tiên của task
+
+    ◦   `UBaseType_t uxPriority`
+
+    ◦   FreeRTOS scheduling dựa trên priority:
+			
+			Priority càng cao → task càng được ưu tiên chạy
+			
+			Task priority thấp sẽ chạy khi CPU rảnh
+			
+*   ``puxStackBuffer`` – Stack buffer do người dùng cấp phát
+
+    ◦   `StackType_t *puxStackBuffer`
+			
+			static StackType_t xSensorStack[256];
+
+*   ``pxTaskBuffer`` – Bộ nhớ TCB do người dùng cung cấp
+
+    ◦   `StaticTask_t *pxTaskBuffer
+`
+			
+			static StaticTask_t xSensorTCB;
+   
+ ##### **2.2.3. Giá trị trả về**
+ 
+* 	`TaskHandle_t` → tạo task thành công
+
+* 	`NULL` → lỗi tạo task (buffer không hợp lệ hoặc thiếu cấu hình)
+
+ ##### **2.2.4. VD**
+
+		static StackType_t xSensorStack[256];
+		static StaticTask_t xSensorTCB;
+
+		TaskHandle_t xHandle = xTaskCreateStatic(
+		    vSensorTask,            // Hàm task
+		    "Sensor",               // Tên debug
+		    256,                    // Stack depth (word)
+		    &sensorConfig,          // Tham số truyền vào
+		    3,                      // Priority
+		    xSensorStack,           // Stack buffer
+		    &xSensorTCB             // TCB buffer
+		);
+
+			
+### **IV. Stack depth**
+
+#### **4.1. Khái niệm**
+
+*  Trong FreeRTOS, **stack depth** là tham số xác định lượng bộ nhớ RAM được cấp phát riêng cho mỗi task nhằm phục vụ cho quá trình thực thi.
+
+*  Stack của task được sử dụng để lưu trữ:
+
+    ◦   Biến cục bộ (local variables)
+
+    ◦   Địa chỉ trả về của hàm (return address)
+
+    ◦   Call stack khi gọi hàm lồng nhau
+
+    ◦  Context CPU khi xảy ra context switch (register save/restore)
+
+    ◦  Một phần dữ liệu tạm thời khi chạy thư viện (printf, malloc…)
+
+#### **4.2. Đặc điểm**
+
+*    **Stack depth được tính theo đơn vị word:**
+
+        ◦   Trên Cortex-M (32-bit): 1 word = 4 bytes
+
+				usStackDepth = 128
+				→ 128 × 4 = 512 bytes RAM
+
+*    **Mỗi task đều có stack riêng biệt:**
+
+        ◦   FreeRTOS là hệ điều hành đa nhiệm, nên mỗi task có vùng stack độc lập.
+
+        ◦   Nếu tạo nhiều task với stack lớn, RAM sẽ nhanh chóng bị tiêu tốn.
+
+
+			5 task × 512 words  
+			→ 5 × 2 KB = 10 KB RAM chỉ cho stack
+				
+
      </details> 
+
+
 <details>
-    <summary><strong>BÀI 4: TASK CHANGE & TASK DELETE</strong></summary>
+    <summary><strong>BÀI 2: PRIORITY AND DELAY</strong></summary>
 
-## **BÀI 4: TASK CHANGE & TASK DELETE**
+## **BÀI 2: TASK PRIORITY AND DELAY**
 
-### **I. Changing Task Priority**
+### **I.  Task Priority**
 
 #### **1.1. Khái niệm**
 
-*   Trong FreeRTOS, priority của task mặc định là cố định (fixed priority) và được thiết lập khi tạo task.
+*   Trong FreeRTOS, **priority** (độ ưu tiên) là tham số quan trọng nhất quyết định task nào sẽ được scheduler chọn để chạy.
+ 
+* Kernel luôn ưu tiên thực thi:
 
-*   Kernel cho phép thay đổi priority tại runtime, nhằm đáp ứng các tình huống động của hệ thống.
-
-#### **1.2. Nguyên tắc lập lịch**
-
-*   FreeRTOS sử dụng priority-based preemptive scheduling (khi configUSE_PREEMPTION = 1):
-
-    ◦   Scheduler luôn chọn task Ready có priority cao nhất
-
-    ◦   Khi priority của một task thay đổi:
-
-        Scheduler đánh giá lại ngay lập tức 
-
-        Có thể xảy ra context switch tức thì
-
-    ◦   Thay đổi priority là thao tác ảnh hưởng trực tiếp đến toàn bộ hệ thống scheduling. 
-
-#### **1.3. Thay đổi Priority**
-
-##### **1.3.1. Đặt Priority mới**
-
-        void vTaskPrioritySet( taskHandle_t xTask,
-                               UBaseType_t uxNewPriority);
-
-*   **xTask:**
-
-    ◦   Handle của task cần thay đổi priority
-
-    ◦   Truyền NULL → thay đổi priority của task hiện tại
-
-*   **uxNewPriority:**
-
-    ◦   Priority mới
-
-    ◦   Giá trị hợp lệ: `0 -> configMAX_PRIORITIES - 1`
-
-            void vTaskWorker(void *pvParameters)
-            {
-                for (;;)
-                {
-                    if (urgent_event)
-                    {
-                        vTaskPrioritySet(NULL, 4);  // nâng priority task hiện tại
-                    }
-            
-                    DoWork();
-            
-                    vTaskPrioritySet(NULL, 1);      // hạ priority sau khi xong
-                    vTaskDelay(pdMS_TO_TICKS(100));
-                }
-            }
+    ◦   Task ở trạng thái Ready có priority cao nhất.
 
 
-##### **1.3.2. Hành vi kernel khi đổi priority**
+#### **1.2. Đặc điểm**
 
-*   **Tăng priority:**
+*   **Scheduler dựa trên priority**
 
-    ◦   Nếu priority mới > task đang chạy
+    ◦   FreeRTOS sử dụng mô hình: Priority-based preemptive scheduling
+			
+			nếu bật `configUSE_PREEMPTION = 1`	
+    
+    ◦   Nếu một task priority cao hơn trở thành Ready → task đang chạy sẽ bị ngắt ngay lập tức
+		 
 
-    ◦   Task có thể preempt ngay lập tức
+				 
+*   **Priority có thể thay đổi trong runtime**
 
-*   **Giảm priority:**
+    ◦   FreeRTOS cho phép thay đổi priority động, giúp hệ thống linh hoạt trong các tình huống như:
+				
+				Xử lý sự kiện khẩn cấp
 
-    ◦   Task có thể bị preempt
+				Tăng ưu tiên tạm thời để hoàn thành deadline
 
-    ◦   CPU được nhường cho task khác
+				Điều chỉnh theo chế độ hoạt động
+			
+    ◦   API sử dụng:
+				
+				vTaskPrioritySet()
 
-*   Preempt xảy ra ngay sau khi gọi API, không cần chờ tick.
+					      
+*   **`configMAX_PRIORITIES` ảnh hưởng overhead hệ thống**
 
-#### **1.4. Lấy priority hiện tại**
+			#define configMAX_PRIORITIES   8
 
-##### **1.4.1. Cú pháp**
 
-        UBaseType_t uxTaskPriorityGet( TaskHandle_t xTask );
+    ◦   Giá trị này xác định số mức priority mà kernel hỗ trợ.
+				
+				Giá trị càng lớn → kernel cần nhiều RAM hơn cho ready list
 
-*   **Tham số:**
+				Giá trị quá nhỏ → khó phân cấp task hợp lý
 
-    ◦   **xTask:** 
+    ◦   8 – 16 mức priority là hợp lý
 
-        Handle của task cần đọc priority
+#### **1.3.Thay đổi priority – `vTaskPrioritySet()`**
 
-        Truyền NULL → lấy priority của task hiện tại
+		void vTaskPrioritySet(
+		    TaskHandle_t xTask,
+		    UBaseType_t uxNewPriority
+		);
 
-*   **Giá trị trả về:**
+   ◦   `xTask`: handle của task cần thay đổi priority
 
-    ◦   Priority hiện tại của task
+   ◦   `uxNewPriority`: priority mới
+
+   ◦  Nếu truyền `NULL` → thay đổi priority của task hiện tại.
+ 
+ #### **1.4. Lấy priority hiện tại – `uxTaskPriorityGet()`**
+
+		UBaseType_t uxTaskPriorityGet(TaskHandle_t xTask);
+
+
+   ◦   Trả về priority hiện tại của task được chỉ định
+
+   ◦   Nếu truyền `NULL` → lấy priority của task đang chạy
+
+   ◦  Ví dụ:
+	
+		UBaseType_t prio = uxTaskPriorityGet(NULL);
         
-### **II. Deleting Tasks**
+### **II. Delay**
+
+#### **2.1. vTaskDelay() – Relative delay**
+
+##### **2.1.1. Khái niệm**
+
+*   `vTaskDelay()` là hàm dùng để **block (tạm dừng) task trong một khoảng thời gian tương đối**, tính từ thời điểm hàm được gọi.
+
+*   Khi task gọi `vTaskDelay()`, nó sẽ chuyển sang trạng thái:
+
+    ◦   **Blocked** và chỉ quay trở lại trạng thái Ready sau khi đủ số tick delay.
+
+
+##### **2.1.2. Đặc điểm**
+
+*   **Delay tương đối (relative)**
+
+    ◦  Thời gian delay bắt đầu được tính ngay tại thời điểm gọi hàm:
+
+		vTaskDelay(200 ticks);
+		
+    ◦  Task sẽ ngủ 200 tick kể từ lúc gọi.
+
+*   **Chu kỳ thực tế bị lệch (drift)**
+
+    ◦  Do task còn phải thực thi code trước khi delay, nên chu kỳ thực tế sẽ là:
+
+		T_period​=T_execution​ + T_delay​
+		
+    ◦  Ví dụ: 
+    
+			Xử lý mất 20 ms
+			Delay 200 ms
+			Chu kỳ thực tế = 220 ms
+
+    ◦  Qua nhiều vòng lặp, task sẽ bị **drift (trôi thời gian)** so với chu kỳ mong muốn.
+
+*   **Phù hợp với task không yêu cầu chu kỳ chính xác**
+
+
+ ##### **2.1.3. Cú pháp**
+ 
+		 void vTaskDelay(TickType_t xTicksToDelay);
+
+* 	`xTicksToDelay` → số tick mà task sẽ bị block
+
+* 	Nên dùng `pdMS_TO_TICKS(ms)`
+ → để đổi từ mili-giây sang tick.
+
+ ##### **2.1.4. VD**
+
+		for(;;)
+		{
+		    ToggleLED();
+		    vTaskDelay(pdMS_TO_TICKS(200));  // Nhấp nháy mỗi 200 ms
+		}
+
+			
+#### **2.2. `vTaskDelayUntil()` – Absolute Delay**
+
+##### **2.2.1. Khái niệm**
+
+*   `vTaskDelayUntil()` là hàm delay theo cơ chế **absolute timing**, tức là task sẽ được block cho đến đúng một **mốc thời gian tuyệt đối tiếp theo**, thay vì delay tương đối từ thời điểm gọi.
+
+*   Nó giúp đảm bảo task chạy theo chu kỳ cố định:
+
+    ◦   T_period​=constant
+
+##### **2.2.2. Đặc điểm**
+
+*   **Chu kỳ chính xác, không bị drift**
+
+    ◦   Kernel tự động tính toán phần thời gian đã trễ và bù lại.
+
+*   **Phù hợp cho periodic task real-time**
+
+    ◦   `vTaskDelayUntil()` được dùng trong các tác vụ yêu cầu chu kỳ chính xác như: 
+
+			Sensor sampling định kỳ
+			Control loop (PID motor)
+			ADC acquisition
+
+*   **Cần lưu lại thời điểm wake-up trước đó**
+
+    ◦   Task phải lưu biến: `TickType_t xLastWakeTime;` để FreeRTOS biết mốc thời gian chuẩn
+         
+##### **2.2.3. Cú pháp**
+
+			void vTaskDelayUntil(
+				TickType_t *pxPreviousWakeTime,
+				TickType_t xTimeIncrement
+			);
+
+
+
+*   `pxPreviousWakeTime` – Con trỏ tới biến tick wakeup trước đó
+
+*   `xTimeIncrement` - Chu kỳ delay mong muốn (theo tick)
+
+*    VD:
+
+
+			uint16_t ADC_ReadChannel(void)
+			{
+				ADC_SoftwareStartConvCmd(ADC1, ENABLE);
+				while(ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC) == RESET);
+				return ADC_GetConversionValue(ADC1);
+			}
+			
+			void vADCTask(void *pvParameters){
+					TickType_t xLastWakeTime;
+					const TickType_t xPeriod = pdMS_TO_TICKS(100);
+					xLastWakeTime = xTaskGetTickCount();
+					for(;;)
+					{
+						uint16_t adcVal = ADC_ReadChannel();
+						ProcessADC(adcVal);
+						vTaskDelayUntil(&xLastWakeTime, xPeriod);
+					}
+			}
+
+
+
+     </details> 
+
+
+
+<details>
+    <summary><strong>BÀI 3: DELETE TASK AND THREAD LOCAL STORAGE</strong></summary>
+
+## **BÀI 3: DELETE TASK AND THREAD LOCAL STORAGE**
+
+### **I.  Delete Task**
+
+#### **1.1. Khái niệm**
+
+*   Trong FreeRTOS, **xóa task (task deletion)** là thao tác loại bỏ một task ra khỏi hệ thống khi task đó không còn cần thiết.
+ 
+* Việc xóa task giúp:
+
+    ◦   Giải phóng tài nguyên RAM đã cấp phát cho task
+
+    ◦   Loại bỏ task khỏi scheduler
+
+    ◦   Tránh chiếm CPU không cần thiết   
+
+* Một task có thể bị xóa theo hai cách:
+
+    ◦   Task khác xóa nó
+
+    ◦   Task tự xóa chính nó (self-delete)
+    
+#### **1.2. Đặc điểm**
+
+*   **Task bị xóa sẽ không còn được scheduler chạy**
+
+    ◦   Sau khi gọi `vTaskDelete()`, task sẽ bị chuyển sang trạng thái: `Deleted state`
+			
+*   **Dynamic Allocation Task**
+
+    ◦   Nếu task được tạo bằng: `xTaskCreate()`  thì stack và TCB được cấp phát từ heap.
+    
+    ◦   Khi task bị xóa:
+
+			FreeRTOS không giải phóng ngay lập tức
+
+			Task sẽ được đưa vào danh sách “waiting termination”
+
+			Idle Task sẽ dọn dẹp và thu hồi heap sau đó		 
+
+				 
+*   **Static Allocation Task**
+
+    ◦   Nếu task được tạo bằng: `xTaskCreateStatic()`  thì stack và TCB do người dùng cung cấp.
+    
+    ◦   Khi task bị xóa:
+
+			Kernel chỉ loại bỏ task khỏi scheduler
+
+			Bộ nhớ stack và TCB không được free, vì đó là static buffer
+
+*   **Không nên xóa task thường xuyên trong hệ real-time**
+
+    ◦   Trong thực tế, task thường tồn tại suốt vòng đời hệ thống.
+    
+    ◦   Nếu cần bật/tắt chức năng, nên dùng:
+
+			Suspend/Resume
+
+			Event/Notification
+
+			State machine
+			
+#### **1.3.Cú pháp `vTaskDelete()`**
+
+		void vTaskDelete(TaskHandle_t xTaskToDelete);
+
+   ◦   `xTaskToDelete`: handle của task cần xóa
+
+   ◦   `vTaskDelete(NULL):` Task hiện tại tự xóa chính nó
+
+ 
+ #### **VD**
+
+		TaskHandle_t xWorkerHandle;
+		void vManagerTask(void *pvParameters)
+		{
+			// Sau một điều kiện nào đó
+			vTaskDelete(xWorkerHandle);
+		}
+
+*  **Lưu ý:**
+
+   ◦   Không được xóa task đang giữ mutex
+
+   ◦   Không nên xóa task nếu còn tài nguyên liên quan (cần cleanup trước khi delete)
+
+   ◦   Idle Task phải luôn tồn tại
+	
+        
+### **II. Thread-Local Storage (TLS)**
 
 #### **2.1. Khái niệm**
 
-*   Trong FreeRTOS, task có thể được xóa (delete) trong quá trình runtime, khi task:
+*   Trong FreeRTOS, **Thread-Local Storage (TLS)** là cơ chế cho phép mỗi task có thể lưu trữ một tập các con trỏ dữ liệu riêng, gắn trực tiếp với task đó.
 
-    ◦   Hoàn thành nhiệm vụ
+*   Mỗi task sẽ có một mảng con trỏ nội bộ:
 
-    ◦   Không còn cần thiết
+    ◦   TLS[0],TLS[1],...,TLS[n−1]
 
-    ◦   Được quản lý bởi task khác (task manager)
+    ◦   Các con trỏ này được truy cập thông qua **index chung**, nhưng giá trị lại **riêng biệt theo từng task**.
 
-*   Việc xóa task giúp:
+#### **2.2. Đặc điểm**
 
-    ◦   Giải phóng RAM (stack, TCB)
+##### **2.2.1. Dữ liệu riêng theo từng task**
 
-    ◦   Giảm tải scheduling
+*   Nếu hai task cùng truy cập:
 
-#### **2.2. vTaskDelete**
+		pvTaskGetThreadLocalStoragePointer(NULL, 0);
+		
+    ◦  Task A sẽ nhận giá trị của Task A
 
-##### **2.2.1. Prototype**
+    ◦  Task B sẽ nhận giá trị của Task B
+    
+##### **2.2.2. Hữu ích trong các ứng dụng task-specific**
 
-        void vTaskDelete( TaskHandle_t xTaskToDelete );
+*  TLS thường được dùng cho:
 
-##### **2.2.2. Tham số**
+    ◦  Logging theo tên task
 
-*   **xTaskToDelete:**
-
-    ◦   Handle của task cần xóa
-
-    ◦   Truyền NULL → task hiện tại tự xóa chính nó
-
-##### **2.2.3. Cơ chế**
-
-*   **1.**: Task bị loại khỏi:
-
-    ◦   Ready list
-
-    ◦   Blocked list
-
-    ◦   Suspended list (nếu có)
-
-*   **2.**: Task chuyển sang trạng thái Deleted
-
-*   **3.**: Task không bao giờ được schedule lại
-
-*   **4.**: Tài nguyên được xử lý:
-
-    ◦   Dynamic allocation:
-
-        Stack + TCB được giải phóng
-
-        Nhưng chỉ khi Idle Task chạy
-
-    ◦   Static allocation:
-
-        Kernel không free
-
-        Người dùng tự quản lý bộ nhớ    
-
-*   Idle Task đóng vai trò thu hồi tài nguyên task bị delete
-
-
-#### **2.3. Deleted State**
-
-*   Không phải trạng thái chạy thực sự
-
-*   Task:
-
-    ◦   Không Ready
-
-    ◦   Không Blocked
-
-    ◦   Không Suspended 
-
-*   Chỉ tồn tại tạm thời cho đến khi Idle Task cleanup xong
-
-### **III. Thread-Local Storage (TLS)**
-
-#### **3.1. Khái niệm**
-
-*   Thread-Local Storage (TLS) cho phép mỗi task có vùng dữ liệu riêng, nhưng dùng chung một chỉ số (index).
-
-*   Cùng một key, nhưng mỗi task giữ giá trị khác nhau
-
-#### **3.2. Cấu hình**
-
-        #define configNUM_THREAD_LOCAL_STORAGE_POINTERS 4
-
-#### **3.3. API**
-
-##### **3.3.1. Gán TLS cho task**
-
-        void vTaskSetThreadLocalStoragePointer(
-            TaskHandle_t xTask,
-            BaseType_t xIndex,
-            void *pvValue
-        );
-
-
-*   xTask: handle task (NULL → task hiện tại)
-
-*   xIndex: chỉ số TLS (0 → max-1)
-
-*   pvValue: con trỏ dữ liệu
+    ◦  Task-specific configuration
+		
+    ◦  Context pointer cho driver 
+    
+    ◦  Lưu handle UART/I2C riêng
+		
+    ◦  Debugging và tracing
 
 *   **VD:**
-
-            void vTaskA(void *pvParameters)
-            {
-                const char *taskName = "TaskA";
-            
-                vTaskSetThreadLocalStoragePointer(
-                    NULL,
-                    TLS_LOGGER_ID,
-                    (void *)taskName
-                );
-            
-                for (;;)
-                {
-                    Log("Hello");
-                    vTaskDelay(pdMS_TO_TICKS(1000));
-                }
-            }
-
-##### **3.3.2. Lấy TLS**
-
-        void *pvTaskGetThreadLocalStoragePointer(
-            TaskHandle_t xTask,
-            BaseType_t xIndex
-        );
+	* Task UART dùng TLS[0] = "UART_Task"
+	* Task Sensor dùng TLS[0] = "Sensor_Task"
 
 
-</details> 
+ ##### **2.2.3. Không cấp phát bộ nhớ mới**
 
+*  TLS chỉ lưu **con trỏ**, không tự động cấp phát hay copy dữ liệu.
+*  Người dùng phải đảm bảo vùng nhớ mà con trỏ trỏ tới vẫn tồn tại hợp lệ.
+
+ ##### **2.2.4. Index có giới hạn bởi cấu hình hệ thống**
+
+* Số lượng TLS pointer mỗi task được quyết định bởi macro:
+			
+			configNUM_THREAD_LOCAL_STORAGE_POINTERS
+
+* Nếu đặt = 4, mỗi task có:
+
+		TLS[0..3]
+	
+#### **2.3. Cấu hình TLS**
+
+*   Trong file `FreeRTOSConfig.h`:
+
+		#define configNUM_THREAD_LOCAL_STORAGE_POINTERS		4
+
+    ◦  Mỗi task sẽ có tối đa 4 slot TLS pointer
+
+    ◦  Tăng giá trị này sẽ làm tăng overhead RAM trên mỗi task
+    
+#### **2.4. API sử dụng TLS**
+
+*   **Gán giá trị TLS**
+
+			void vTaskSetThreadLocalStoragePointer(
+				TaskHandle_t xTask, 
+				BaseType_t  xIndex,
+				void *pvValue
+				);
+				
+    ◦   `xTask:` task cần gán TLS
+    ◦   `NULL:` task hiện tại
+    ◦   `xIndex:` vị trí TLS slot (0 -> N-1)
+    ◦   `pvValue:` con trỏ dữ liệu muốn lưu        
+
+*   **Lấy giá trị TLS**
+
+			void *pvTaskGetThreadLocalStoragePointer(
+				TaskHandle_t xTask,
+				BaseType_t xIndex
+				);
+				
+    ◦   Trả về con trỏ đã lưu trong TLS slot tương ứng
+
+			Sensor sampling định kỳ
+			Control loop (PID motor)
+			ADC acquisition
+
+*   **VD: Logging theo tên task**
+
+    ◦   Khởi tạo TLS trong task
+		
+		void vTaskInit(void *pvParameters){
+			vTaskSetThreadLocalStoragePointer(NULL, 0, (void*)"UART_Task");
+			for(;;)
+			{
+				// Task code
+			}
+		}
+
+    ◦   Hàm log dùng TLS
+		
+		void LogData(int value){
+			const char *name = 
+				(const char *) pvTaskGetThreadLocalStoragePointer(NULL, 0);
+			printf("[%s] Value: %d\n", name, value);
+		}	
+
+    ◦   Output
+		
+		// Nếu task UART gọi
+		LogData(123)
+		
+		// Kết quả:
+		[UART_Task] Value: 123
+		
+		// Nếu task sensor gọi:
+		[Sensor_Task] Value: 123
+		
+		-> Logging tự động phân biệt theo task
+		
+*   **Lưu ý**
+
+    ◦   Không lưu con trỏ tới biến local
+
+		// Sai vì buffer sẽ mất khi ra khỏi scope
+		void vTask(void *p){
+			char buffer[20];
+			vTaskSetThreadLocalStoragePointer(NULL, 0, buffer);
+			}
+
+    ◦   Nếu TLS trỏ tới vùng nhớ malloc, người dùng phải tự free trước khi xóa task.
+
+    ◦   TLS slot nên có quy ước rõ ràng
+		
+		TLS[0] = Task name
+		TLS[1] = Config struct
+		TLS[2] = Driver handle
+		
+    
+     </details> 
+
+
+
+<details>
+    <summary><strong>BÀI 4: TASK RUNTIME CHECK</strong></summary>
+
+## **BÀI 4: TASK RUNTIME CHECK**
+
+### **I.  Delete Task**
+
+#### **1.1. vTaskList()**
+
+##### **1.1.1. Khái niệm**
+
+*   Trong FreeRTOS, hàm **`vTaskList()`** dùng để xuất ra danh sách toàn bộ task hiện có trong hệ thống dưới dạng một chuỗi (string).
+ 
+*  Danh sách này thường bao gồm:
+
+    ◦   Tên task
+
+    ◦   Trạng thái task (Running/Ready/Blocked/…)
+
+    ◦   Priority   
+
+    ◦   Stack còn dư
+
+    ◦   Task number (ID)   
+ 
+##### **1.1.2. Cấu hình**
+ 
+* Để sử dụng `vTaskList()`, cần bật các macro trong `FreeRTOSConfig.h`
+
+	    #define  configUSE_TRACE_FACILITY				1
+        #define  configUSE_STATS_FORMATTING_FUNCTIONS	1
+
+    ◦   `configUSE_TRACE_FACILITY`: bật cơ chế trace nội bộ để kernel lưu thông tin task
+
+    ◦   `configUSE_STATS_FORMATTING_FUNCTIONS`: cho phép FreeRTOS format thông tin thành chuỗi  
+ 
+ ##### **1.1.3. Cú pháp**
+ 
+		 void vTaskList(char *pcWriteBuffer);
+		 
+* `pcWriteBuffer`: buffer do người dùng cung cấp để kernel ghi output string vào
+*  Buffer phải đủ lớn để chứa danh sách tất cả task.
+
+* **VD:**
+				
+				char buf[512];
+				vTaskList(buf);	 
+				printf("Name\tState\tPri\tStack\tNum\n%s", buf);					 
+ 
+     ◦   Output:
+
+		Name          State  Pri  Stack  Num
+		-------------------------------------
+		IDLE          R      0    120    1
+		SensorTask    B      3    200    2
+		UARTTask      R      2    180    3
+		MotorCtrl     R      5    90     4
+				
+     
+#### **1.2. vTaskGetRunTimeStats()**
+
+##### **1.2.1. Khái niệm**
+
+*   Trong FreeRTOS, hàm `vTaskGetRunTimeStats()`  dùng để thống kê thời gian CPU đã được sử dụng bởi từng task, từ đó tính ra:
+
+    ◦   % CPU usage của mỗi task
+ 
+##### **1.2.2. Cấu hình**
+ 	
+*   **Để sử dụng runtime stats, cần bật các macro trong `FreeRTOSConfig.h`:**
+			
+			#define configGENERATE_RUN_TIME_STATS			1
+			#define configUSE_TRACE_FACILITY					1
+			#define configUSE_STATS_FORMATTING_FUNCTIONS		1
+    ◦   Nếu task được tạo bằng: `xTaskCreate()`  thì stack và TCB được cấp phát từ heap.
+    
+*   **Ngoài ra, hệ thống phải cung cấp timer đo thời gian runtime:**
+
+
+			#define portCONFIGURE_TIMER_FOR_RUN_TIME_STATS()
+			#define portGET_RUN_TIME_COUNTER_VALUE()
+	 
+
+				 
+##### **1.2.3. Cú pháp**
+
+			void vTaskGetRunTimeStats(char *pcWriteBuffer);
+ 	
+*   `pcWriteBuffer`: buffer để ghi bảng thống kê output
+
+*   VD :
+		
+			char buf[512];
+			vTaskGetRunTimeStats(buf);
+			printf("Task Runtime Stats:\n%s\n", buf)
+
+*   Output:
+
+		Task            Time        %
+		--------------------------------
+		IDLE            5000        50%
+		SensorTask      2000        20%
+		UARTTask        1500        15%
+		MotorCtrl       1500        15%
+
+
+			
+
+#### **1.3. uxTaskGetStackHighWaterMark()**
+
+##### **1.3.1. Khái niệm**
+
+*   Trong FreeRTOS, mỗi task có stack riêng.
+
+*   Hàm `uxTaskGetStackHighWaterMark()` trả về số lượng word stack còn trống nhỏ nhất từng đạt được kể từ khi task được tạo.
+
+*  VD:
+	* Nếu task được cấp: 256 words stack và hàm trả về 40 words
+	* Task đã từng dùng tối đa: 216 words
+	* Nếu số dư quá nhỏ → nguy cơ crash.
+ 
+##### **1.3.2. Cú pháp**
+ 	
+		UBaseType_t uxTaskGetStackHighWaterMark(TaskHandle_t xTask);
+    
+*   `xTask`: handle task cần kiểm tra
+*   Nếu truyền `NULL`:
+
+			uxTaskGetStackHighWaterMark(NULL);
+*   VD: Kiểm tra stack low
+
+		UBaseType_t hw = uxTaskGetStackHighWaterMark(xHandle);
+
+		if (hw < 50)
+		{
+		    printf("Warning: Stack low!\n");
+		}
+	 
+### **II.  Stack Measure**
+
+#### **2.1. Ước lượng stack ban đầu**
+
+*   Khi thiết kế task, việc chọn stack depth thường bắt đầu bằng ước lượng sơ bộ.
+ 
+			Stack≈Base + LocalVars + CallDepth
+
+    ◦   **Base overhead**: phần tối thiểu cho context + scheduler
+
+    ◦   **Call depth**: độ sâu hàm gọi lồng nhau
+
+    ◦   **Local variables**: biến cục bộ trong task
+  
+#### **2.2. Phương pháp đo stack thực tế**
+ 
+* High-Water Mark
+	* FreeRTOS cung cấp API chuẩn:
+		* `uxTaskGetStackHighWaterMark()`
+
+
+				UBaseType_t freeWords;
+
+				freeWords = uxTaskGetStackHighWaterMark(xHandle);
+
+				printf("Stack remaining: %lu words\n", freeWords);
+
+
+* Debugger Memory View
+	* Ngoài HighWaterMark, có thể kiểm tra stack bằng debugger:
+		* Keil uVision
+		* STM32CubeIDE
+		* IAR Embedded Workbench
+
+
+* Bật Stack Overflow Detection
+	* Trong `FreeRTOSConfig.h`:
+	
+			#define configCHECK_FOR_STACK_OVERFLOW 2
+
+	* Kernel sẽ gọi hook khi overflow:
+	
+			void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
+			{
+			    printf("Stack overflow in task: %s\n", pcTaskName);
+
+			    taskDISABLE_INTERRUPTS();
+			    for(;;);
+			}
+
+     </details> 
 # CHƯƠNG 5: QUEUE MANAGEMENT 
 <details>
     <summary><strong>BÀI 1: FUNDAMETALS AND OPERATING PRINCIPLES OF QUEUES</strong></summary>
