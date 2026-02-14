@@ -1,4 +1,492 @@
 
+# CHƯƠNG 3: HEAP MANAGEMENT 
+<details>
+    <summary><strong>BÀI 1: HEAP INTRODUCTION, HEAP SCHEMES</strong></summary>
+
+## **BÀI 1: HEAP INTRODUCTION, HEAP SCHEMES**
+
+### **I.  HEAP INTRODUCTION**
+
+#### **1.1. Khái niệm**
+
+*   Trong FreeRTOS, kernel cần sử dụng RAM để tạo và quản lý các đối tượng hệ điều hành (kernel objects), ví dụ:
+ 
+    ◦   **Task**: gồm Task Control Block (TCB) + stack riêng
+
+    ◦   **Queue / Message Buffer**
+ 
+    ◦   **Semaphore / Mutex**
+
+    ◦   **Software Timer**
+ 
+    ◦   **Event Group**
+        
+*  FreeRTOS hỗ trợ hai chiến lược quản lý bộ nhớ chính:
+
+    ◦   **Dynamic Allocation (Heap-based)**
+
+    ◦   **Static Allocation (User-provided buffers)**
+
+ 
+#### **1.2. Đặc điểm**
+ 
+* Heap trong FreeRTOS không phải heap chuẩn của C
+
+*  FreeRTOS không bắt buộc dùng `malloc()` của libc.
+
+* Thay vào đó, nó cung cấp heap riêng thông qua: `heap_1.c`, `heap_2.c`, `heap_3.c`, `heap_4.c`, `heap_5.c`
+
+* Heap size được cấu hình qua:
+
+		#define configTOTAL_HEAP_SIZE (10 * 1024)
+		
+    ◦   Đơn vị: bytes
+    ◦   Heap này được dùng để cấp phát object nếu bật dynamic allocation
+ 
+
+### **II.  Heap Management Schemes**
+
+#### **2.1. Khái niệm**
+
+*   FreeRTOS không bắt buộc sử dụng `malloc()` và `free()` của thư viện C chuẩn
+
+*    Thay vào đó, kernel cung cấp nhiều cơ chế quản lý heap riêng để phù hợp với các hệ thống embedded có yêu cầu khác nhau về 
+
+	    ◦   Tính ổn định bộ nhớ
+	     
+	    ◦   Khả năng dự đoán
+
+	    ◦   Mức độ fragmentation
+	     
+	    ◦   Giới hạn tài nguyên RAM
+	    
+*    FreeRTOS cung cấp 5 file triển khai heap, đặt tên theo dạng
+
+	    ◦   **heap_1.c**
+
+	    ◦   **heap_2.c**  
+
+	    ◦   **heap_3.c**
+
+	    ◦   **heap_4.c** 
+
+	    ◦   **heap_5.c**
+
+#### **2.2. Phân loại**
+
+#####  **2.2.1. Heap_1**
+
+* **Khái niệm:**
+	
+	*  Heap_1 là scheme đơn giản nhất, thực chất là một **subdivision allocator (bộ cấp phát phân nhỏ dần)**
+	
+	*  Sử dụng một mảng tĩnh duy nhất (kích thước định nghĩa bới `configTOTAL_HEAP_SIZE`
+		
+	* Chỉ hỗ trợ **allocate** (cấp phát bộ nhớ), không hỗ trợ **free/deallocation** (giải phóng bộ nhớ)
+
+* **Cơ chế hoạt động:**
+
+	* **Allocation (cấp phát):**
+		* Tìm khối trống tiếp theo và phân nhỏ để trả về con trỏ.
+		
+		*  Mỗi khối có header nhỏ (thường 8 byte) lưu kích thước.
+
+	* **Deallocation (giải phóng):**
+		* Không hỗ trợ, bộ nhớ đã cấp phát không bao giờ thu hồi.
+		
+* **Đặc điểm:**
+	
+	*  Thời gian cấp phát luôn cố định
+	
+	*  Không bao giờ phân mảnh bộ nhớ
+		 
+	*  Không hỗ trợ `vPortFree()`
+	
+* **VD1:** `configTOTAL_HEAP_SIZE = 10240 byte`
+		
+	*  Tạo task → cấp phát 1024 byte stack → heap còn 9216 byte liên tục.
+	
+	*  Tạo task khác → cấp phát 2048 byte → heap còn 7168 byte.
+		 
+	*  Xóa task đầu → không thu hồi 1024 byte → heap vẫn chỉ còn 7168 byte.
+
+* **VD2:** 
+		
+			/* Task 1: stack 1024 byte */
+			void vTask1(void *pvParameters){
+				for(;;)
+				{
+					vTaskDelay(pdMS_TO_TICKS(1000));
+				}
+			}
+		
+		/* Task 2: stack 2048 byte */
+		void vTask2(void *pvParameters){
+			for(;;)
+			{
+				vTaskDelay(pdMS_TO_TICKS(1000));
+			}
+		}
+		
+		int main(void){
+			TaskHandle_t xHandle1;
+			TaskHandle_t xHandle2;
+			
+	    /* Heap ban đầu: 10240 byte */
+	    printf("Heap ban dau: %u byte\n", (unsigned)xPortGetFreeHeapSize());
+		
+		/* Bước 1: Tạo task 1 -> cấp phát stack ~1024 byte */
+		xTaskCreate(vTask1, "Task1", 256, NULL, 1, &xHandle1);
+	    printf("Sau khi tao Task1: %u byte\n",
+           (unsigned)xPortGetFreeHeapSize());
+
+		/* Bước 2: Tạo task 2 -> cấp phát stack ~2048 byte */
+		xTaskCreate(vTask2, "Task2", 512, NULL, 1, &xHandle2);
+	    printf("Sau khi tao Task2: %u byte\n",
+           (unsigned)xPortGetFreeHeapSize());
+       
+       /* Bước 3: Xóa task 1 */
+       vTaskDelete(xHandle1);
+       printf("Sau khi xoa Task1: %u byte\n", (unsigned)xPortGetFreeHeapSize());
+       vTaskStartScheduler();
+       while(1);
+       }
+#####  **2.2.2. Heap_2**
+
+* **Khái niệm:**
+	
+	*  Heap_2 được xây dựng nhằm mở rộng `heap_1` bằng cách bổ sung:
+
+		*  Cấp phát bộ nhớ động (`pvPortMalloc`)
+		
+		* Giải phóng bộ nhớ (`vPortFree`)	
+	
+	* Khác với `heap_1` chỉ allocate tuyến tính, `heap_2` duy trì một danh sách các vùng nhớ trống để tái sử dụng các block đã được free
+		
+* **Cơ chế hoạt động:**
+	
+	*  **Allocation (cấp phát):** 
+	
+		* Khi gọi:
+				
+				pvPortMalloc(size)		
+	 
+		* Kernel sẽ:
+	
+			* Duyệt danh sách các block trống 
+			* Tìm một block đủ lớn để cấp phát
+			* Có thể split block nếu block lớn hơn yêu cầu
+		
+	*  **Deallocation (giải phóng):** 
+	
+		* Khi gọi:
+				
+				vPortFree(ptr)
+	 
+		* Kernel sẽ:
+	
+			* Đưa block vừa free trở lại free list 
+			* Block được đánh dấu là trống
+
+* **Đặc điểm:**
+	
+	*  Không có cơ chế gộp các khối trống liền kề, vì vậy bộ nhớ rất dễ bị chia nhỏ thành nhiều mảnh rời rạc theo thời gian
+	
+	*  Thời gian cấp phát không cố định, do hệ thống phải duyệt qua danh sách các khối trống để tìm vùng phù hợp
+		 
+	*  Bộ nhớ bị phân mảnh tăng nhanh nếu việc cấp phát và giải phóng diễn ra với nhiều kích thước khác nhau
+	
+	*  Không đảm bảo được tính ổn định về thời gian thực, vì thời gian cấp phát phụ thuộc vào số lượng khối trống trong heap
+	
+* **VD1:**
+	* Giả sử heap ban đầu có 10000 byte liên tục:
+			
+				[ 10000 bytes free ]
+
+		*  **Bước 1: Allocate 2000 byte**
+		
+				[ 2000 used ][ 8000 free ]
+
+		*  **Bước 2: Allocate thêm 3000 byte**
+		
+				[ 2000 used ][ 3000 used ][ 5000 free ]
+
+		*  **Bước 3: Free block đầu tiên (2000 byte)**
+		
+				[ 2000 free ][ 3000 used ][ 5000 free]
+
+				// Tổng free là 2000 + 5000 = 7000 byte nhưng heap bị chia thành 2 block rời rạc
+
+		
+		*  **Bước 4: Allocate 6000 byte**
+		
+				// heap_2 không thể gộp 2 block free lại
+
+				// không block nào đủ lớn hơn 6000 byte dẫn tới allocation thất bại
+
+* **VD2:**
+	
+			
+				void vHeap2FragmentationDemo(void){
+					void *p1;
+					void *p2;
+					void *p3;
+					
+					/* Allocation 2000 bytes */
+					p1 = pvPortMalloc(2000);
+
+					/* Allocation 3000 bytes */
+					p2 = pvPortMalloc(3000);
+
+					/* Free the first block */
+					vPortFree(p1);
+
+					/* Now heap has two free blocks: 2000 and 5000 */
+					
+					/* Try allocating 6000 bytes */
+					
+					p3 = pvPortMalloc(6000);
+					if (p3 == NULL){
+						printf("Heap_2 allocation failed: fragmentation occurred!\n");
+					}
+				}
+
+#####  **2.2.3. Heap_3**
+
+* **Khái niệm:**
+	
+	*  Heap_3 đóng vai trò như một lớp bao bọc (wrapper) để sử dụng trực tiếp các hàm
+
+		*  `malloc()`
+		
+		* `free()`	
+		
+* **Cơ chế hoạt động:**
+	
+	*  Trong `heap_3`, các hàm cấp phát của FreeRTOS thực chất chỉ gọi lại hàm chuẩn của C:
+	
+		* `pvPortMalloc()` sẽ gọi `malloc()`
+		* `vPortFree()` sẽ gọi `free()`
+
+	 
+	* Trước khi gọi, kernel sẽ tạm thời khóa scheduler hoặc vào vùng critical section để tránh 2 task gọi malloc cùng lúc
+	
+			void *pvPortMalloc(size_t xSize)
+			{
+				taskENTER_CRITICAL();
+				void *ptr = malloc(xSize);
+				taskEXIT_CRITICAL();
+				
+				return ptr;
+			}
+			
+			void vPortFree(void *pv){
+				taskENTER_CRITICAL();
+				free(pv);
+				taskEXIT_CRITICAL();
+			}
+
+* **Đặc điểm:**
+	
+	*  Không dùng `configTOTAL_HEAP_SIZE` , dung lượng heap sẽ phụ thuộc vào: linker script, C library
+	
+	* Phụ thuộc hoàn toàn vào malloc/free của compiler
+		 
+	*  Các hàm `malloc()` thường có thời gian chạy không cố định dẫn tới không phù hợp với hệ thống thời gian thực nghiêm ngặt
+	
+	*  Chỉ phù hợp với các môi trường giả lập hoặc các dự án thử nghiệm
+	
+* **VD:**
+	
+			
+				void vExampleTask(void *pvParameters){
+				
+					char *buffer;
+					
+					/* Cấp phát 256 byte từ malloc() của hệ thống */
+					buffer = (char *)pvPortMalloc(256);
+					if (buffer == NULL){
+						printf("Khong du bo nho!\n");
+					}
+					else
+					{
+						strcpy(buffer, "FreeRTOS heap_3 example");
+						printf("%s\n", buffer);
+						
+						vPortFree(buffer);
+					}
+					vTaskDelete(NULL);
+				}	
+					
+#####  **2.2.4. Heap_4**
+
+* **Khái niệm:**
+	
+	*  Heap_4 là sơ đồ quản lý bộ nhớ được sử dụng phổ biến nhất trong FreeRTOS vì:
+
+		*  Hiệu quả trong sử dụng RAM
+		
+		* Khả năng cấp phát giải phóng linh hoạt
+
+		* Giảm phân mảnh bộ nhớ
+
+	*  Hỗ trợ đầy đủ hai cơ chế quan trọng:
+	
+		* Tách một khối trống lớn thành khối nhỏ vừa đủ khi cấp phát 
+		
+		* Hợp nhất các khối trống liền kề khi giải phóng
+		 		
+* **Cơ chế hoạt động:**
+	
+	*  **Khi cấp phát (Allocation):**
+	
+		* Khi gọi `pvPortMalloc(size)`, kernel sẽ thực hiện:
+				
+				1. Duyệt danh sách các khối trống 
+				2. Tìm khối đầu tiên có kích thước đủ lớn
+				3. Nếu khối đó lớn hơn kích thước cần thiết, tách ra 
+				4. Cấp phát phần vừa đủ, phần dư vẫn giữ lại làm block trống 
+				
+		* VD:
+				
+				block trống 5000 byte
+				yêu cầu 2000 byte
+				heap_4 sẽ tách thành:
+					[2000 used][3000 free]
+
+	 
+	*  **Khi giải phóng (Deallocation):**
+	
+		* Khi gọi `vPortFree(ptr)`, kernel sẽ thực hiện:
+				
+				1. Đánh dấu block đó là trống 
+				2. Kiểm tra block ngay trước và ngay sau
+				3. Nếu các block liền kề cũng trống, tự động kết hợp 
+				4. Tạo thành một block lớn liên tục 
+				
+		* VD:
+				
+				[2000 free][3000 free]
+				// Sau hợp nhất trở thành 
+				[5000 free]
+
+* **Đặc điểm:**
+	
+	*  Hỗ trợ cấp phát và giải phóng động đầy đủ (`pvPortMalloc`/`vPortFree`)
+	
+	* Thời gian cấp phát không hoàn toàn cố định, vì phải duyệt danh sách block trống
+		 
+	*  Cấp phát hiệu quả ngay cả khi kích thước object thay đổi liên tục
+	
+* **VD1:**
+	
+	* Heap ban đầu:
+			
+			[10000 free]
+	
+	* Cấp phát 2000 byte
+
+			[2000 used][8000 free]
+		 
+	*  Cấp phát thêm 3000 byte
+
+			[2000 used][3000 used][ 5000 free]
+			
+	* Giải phóng block đầu tiên (2000 byte)
+
+			[2000 free][3000 used][5000 free]
+		 
+	*  Giải phóng tiếp block 3000 byte
+
+			[2000 free][3000 free][ 5000 free]
+			
+			// heap_4 ngay lập tức thực hiện hợp nhất
+			
+			[10000 free]
+
+	*  Cấp phát 6000 byte
+
+			// Vì heap đã được hợp nhất thành một block liên tục lớn:
+			
+			pvPortMalloc(6000);
+			
+			// Thành công
+			[6000 used][4000 free]
+
+* **VD2:**
+			
+			void Heap4Example(void){
+				void *p1 = pvPortMalloc(2000);
+				void *p2 = pvPortMalloc(3000);
+				vPortFree(p1);
+				vPortFree(p2);
+				void *p3 = pvPortMalloc(6000);
+				if (p3 != NULL)
+				{
+					printf("Cap phat 6000 byte thanh cong!\n");
+				}
+				else
+				{
+					printf("Cap phat that bai!\n");
+				}
+			}
+
+#####  **2.2.5. Heap_5**
+
+* **Khái niệm:**
+	
+	*  Heap_5 giúp cho phép heap được trải trên nhiều vùng RAM rời rạc, không cần liên tục trong không gian địa chỉ
+		 		
+* **Cơ chế hoạt động:**
+	
+	*  **Heap gồm nhiều vùng nhớ**
+	
+		* Thay vì chỉ có một vùng heap liên tục như `heap_4`, heap_5 cho phép khai báo nhiều vùng:
+			*	vùng RAM trong (nhanh, nhỏ)
+			*	vùng RAM ngoài (lớn, chậm)
+				
+	*  **Bắt buộc phải khởi tạo trước khi cấp phát**
+	
+		* Trước khi gọi bất kỳ hàm nào, người dùng phải khai báo các vùng heap và gọi
+	
+				vPortDefineHeapRegions()
+
+	*  **Khai báo các vùng bằng mảng HeapRegion_t**
+	
+		* Người dùng cần cung cấp một mảng các vùng heap, mỗi vùng gồm: 
+
+				Địa chỉ bắt đầu 
+				Kích thước vùng
+				
+		* Các vùng phải được sắp xếp theo thứ tự địa chỉ tăng dần
+
+* **Đặc điểm:**
+	
+	*  Cho phép heap nằm trên nhiều vùng RAM khác nhau, kể cả không liền kề
+	
+	* Sau khi khởi tạo, hành vì cấp phát/giải phóng giống heap_4
+		 
+* **VD:**
+	
+	*  Giả sử MCU có 2 vùng RAM:
+		* SRAM nội: 64 KB tại `0x20000000`
+		* SDRAM ngoài: 512 KB tại `0x90000000`
+	
+			    HeapRegion_t xHeapRegions[] = 
+			    {
+				   { (uint8_t *)0x20000000UL, 64 * 1024 },			// SRAM nội (nhanh)
+				   { (uint8_t *)0x90000000UL, 512 * 1024},			// SDRAM ngoài (lớn)		
+				   { NULL, 0 }		// Kết thúc danh sách
+				};	
+				
+				int main(void){
+					SystemInit();
+					vPortDefineHeapRegions(xHeapRegions);
+					xTaskCreate(vTaskApp, "APP", 512, NULL, 2, NULL)L
+					vTaskStartScheduler();
+					while(1);
+				}											
+     </details> 
 # CHƯƠNG 4: TASKS MANAGEMENT 
 <details>
     <summary><strong>BÀI 1: TASK FUNCTION, TASK CREATION AND STACK DEPTH</strong></summary>
