@@ -5,7 +5,7 @@
 
 ## **BÀI 1: HEAP INTRODUCTION, HEAP SCHEMES**
 
-### **I.  HEAP INTRODUCTION**
+### **I.  Heap Introduction**
 
 #### **1.1. Khái niệm**
 
