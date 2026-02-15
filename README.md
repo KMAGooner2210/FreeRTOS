@@ -487,6 +487,292 @@
 					while(1);
 				}											
      </details> 
+
+<details>
+    <summary><strong>BÀI 2: STATIC ALLOCATION</strong></summary>
+
+## **BÀI 2: STATIC ALLOCATION**
+
+### **I.  Tổng quan**
+
+#### **1.1. Khái niệm**
+
+*   Static Allocation (cấp phát tĩnh) là cơ chế mà toàn bộ bộ nhớ cho các kernel objects được chuẩn bị trước từ các giai đoạn như :
+	* **Compile-time:** Giai đoạn biên dịch
+	* **Startup:**	 Quá trình khởi động hệ thống
+ 
+*	Trong cơ chế này, kernel không sử dụng heap và không gọi hàm `pvPortMalloc()`
+*	Hệ thống chỉ sử dụng các vùng nhớ đã được cung cấp sẵn bởi người dùng
+
+
+ 
+#### **1.2. Thành phần**
+
+##### **1.2.1. Giới thiệu**
+ 
+*  Mỗi đối tượng kernel trong FreeRTOS khi được tạo ra đều cần hai nhóm bộ nhớ chính để hoạt động:
+
+	*  **Vùng quản lý nội bộ (Control Block)**
+	
+	*  **Vùng dữ liệu thực tế (Data Buffer)**
+	
+
+##### **1.2.2. Control Block**
+
+* Control Block là cấu trúc dữ liệu nội bộ mà kernel sử dụng để quản lý đối tượng
+
+* Mỗi loại kernel object sẽ có một control block tương ứng:
+
+	*  Task sử dụng **Task Control Block (TCB)**
+	
+	*  Queue sử dụng **Queue Control Block (QCB)**
+	 
+	*  Software Timer sử dụng **Timer Control Block** 
+
+* Các cấu trúc này chứa các thông tin quan trọng phục vụ cho scheduling và quản lý runtime, bao gồm:
+
+	*  Trạng thái hoạt động của đối tượng
+	
+	*  Priority scheduling của task 
+	
+	*  Con trỏ stack và thông tin ngữ cảnh 
+	
+	*  Các tham số đồng bộ (semaphore, mutex) 
+	
+	*  Dữ liệu liên quan đến quản lý hệ thống thời gian thực   
+
+##### **1.2.3. Data Buffer**
+
+* Ngoài vùng quản lý, kernel còn cần một vùng bộ nhớ dữ liệu thực tế để đối tượng có thể hoạt động đúng chức năng
+
+* Data Buffer là vùng làm việc trực tiếp của đối tượng trong runtime 
+
+* VD:
+
+	*  Task cần một vùng stack riêng để lưu biến cục bộ, context và lời gọi hàm
+	
+	*  Queue cần vùng lưu trữ các item được gửi/nhận 
+	
+	*  Stream buffer cần bộ như để chứa dữ liệu truyền liên tục 
+	
+	*  Message buffer cần vùng lưu các gói message  
+
+	*  Task sử dụng **Task Control Block (TCB)**
+	
+	*  Queue sử dụng **Queue Control Block (QCB)**
+ 
+#### **1.3. Cấu hình**
+
+*  Trong `FreeRTOSConfig.h`:
+
+			#define  configSUPPORT_STATIC_ALLOCATION		1
+
+*  Khi bật macro này, FreeRTOS sẽ cung cấp thêm các hàm có hậu tố Static cho hầu hết các đối tượng:
+	* `xTaskCreateStatic()`
+	* `xQueueCreateStatic()`
+	* `xSemaphoreCreateBinaryStatic()`, `xSemaphoreCreateMutexStatic()`,...
+	* `xTimeCreateStatic()`
+	* `xEventGroupCreateStatic()`
+	*  `xStreamBufferCreateStatic()`, `xMessageBufferCreateStatic()`, ...
+	
+*   Nếu chỉ dùng static allocation, có thể đặt:
+
+			#define configTOTAL_HEAP_SIZE			0 		// Không cần heap nữa
+
+	
+### **II.  Cơ chế cấp phát bộ nhớ**
+
+#### **2.1. Các tiến trình nền trong FreeRTOS Kernel**
+
+*   Trong FreeRTOS, ngay cả khi hệ thống được cấu hình sử dụng hoàn toàn cơ chế cấp phát tĩnh, kernel vẫn phải tạo ra một số task hệ thống nội bộ để scheduler có thể hoạt động đúng
+
+*    Khi bật static allocation, kernel vẫn tự động tạo
+
+	    ◦   **Idle Task** (luôn tồn tại trong mọi hệ thống FreeRTOS)
+	     
+	    ◦   **Timer Service Task** (được tạo khi `configUSE_TIMERS = 1`)
+
+#### **2.2. Idle Task và cơ chế duy trì scheduler**
+
+*   Idle Task là task có priority thấp nhất và luôn được kernel tạo ra khi scheduler bắt đầu hoạt động
+
+*   Task này đảm bảo rằng hệ thống luôn có ít nhất một task ở trạng thái ready để CPU có thể thực thi khi không còn task ứng dụng nào sẵn sàng chạy.
+
+*   Idle Task còn đảm nhiệm một số chức năng quan trọng:
+
+	*   Thực thi khi toàn bộ các task khác đang bị block hoặc suspended
+	
+	*   Thu hồi tài nguyên của các task đã bị xóa (task cleanup)
+	
+	*    Gọi Idle Hook nếu hệ thống bật tùy chọn `configUSE_IDLE_HOOK`
+	
+#### **2.3. Timer Task và quản lý software timer**
+
+*   Khi hệ thống bật software timer thông qua cấu hình:
+			
+			#define configUSE_TIMERS		1
+			
+*   FreeRTOS sẽ tự động tạo thêm Timer Service Task
+
+*   Task này chịu trách nhiệm quản lý toàn bộ software timer trong hệ thống, bao gồm:
+
+	*  Theo dõi thời điểm hết hạn của timer
+	
+	*  Thực thi các hàm callback tương ứng 
+	
+	*  Xử lý các lệnh điều khiển timer được gửi từ các task khác
+	
+####  **2.4.Application Hook**
+
+#####  **2.4.1. Giới thiệu**
+
+*  Trong cấp phát động, kernel tạo task bằng cách cấp phát bộ nhớ từ heap thông qua `pvPortMalloc()`
+
+* Khi hệ thống sử dụng static allocation hoàn toàn, heap không được sử dụng do đó kernel không thể tự cấp phát bộ nhớ cho các task nền.
+
+* FreeRTOS giải quyết vấn đề này bằng cách cung cấp cơ chế **Application Hook**
+
+	* Người dùng phải định nghĩa các hàm đặc biệt để kernel lấy bộ nhớ cần thiết
+  
+* Hai hook bắt buộc bao gồm:
+	* `vApplicationGetIdleTaskMemory()`
+	* `vApplicationGetTimerTaskMemory()`
+		
+
+#####  **2.4.2. vApplicationGetIdleTaskMemory()**
+
+* Hàm `vApplicationGetIdleTaskMemory()` được kernel gọi tự động khi FreeRTOS khởi tạo scheduler.
+	
+*  **Cú pháp**
+
+			void vApplicationGetIdleTaskMemory(
+					StaticTask_t **ppxIdleTaskTCBBuffer,
+					StaticType_t  **ppxIdleTaskStackBuffer,
+					uint32_t *pulIdleTaskStackSize
+			);
+
+	* **`StaticTask_t **ppxIdleTaskTCBBuffer`**: 
+	
+		* Đây là con trỏ kép trỏ đến vùng nhớ chứa **Task Control Block (TCB)** của Idle Task.
+		
+		* Kernel cần TCB để lưu thông tin quản lý task như: 
+				
+				Trạng thái task
+				Priority
+				Con trỏ stack
+				Thông tin scheduling
+	 
+		* Kernel cần TCB để lưu thông tin quản lý task như: 
+	
+				static StaticTask_t xIdleTaskTCB;
+
+		* Sau đó trả địa chỉ cho kernel:
+	
+				*ppxIdleTaskTCBBuffer = &xIdleTaskTCB;
+
+						
+	*  **`StackType_t **ppxIdleTaskStackBuffer:`** 
+	
+		* Đây là con trỏ kép trỏ đến vùng nhớ stack được cấp phát tĩnh cho Idle Task.
+		
+		* Stack này lưu:
+				
+				Biến cục bộ trong task
+				Địa chỉ return 
+				Context CPU khi context switch
+	 
+		* Người dùng khai báo stack dưới dạng mảng:
+	
+				static StackType_t uxIdleTaskStack[ configMINIMAL_STACK_SIZE ];
+
+		* Trả địa chỉ stack cho kernel:
+	
+				*ppxIdleTaskStackBuffer = uxIdleTaskStack;
+
+	*  **`uint32_t *pulIdleTaskStackSize:`** 
+	
+		* Đây là con trỏ trỏ đến biến lưu kích thước stack của Idle Task.
+		
+		* Giá trị được tính theo **số phần tử StackType_t**, không phải byte. 
+
+				*pulIdleTaskStackSize = configMINIMAL_STACK_SIZE;
+
+#####  **2.4.3. vApplicationGetTimerTaskMemory()**
+
+* Khi hệ thống bật software timer (`configUSE_TIMERS = 1`), kernel sẽ tạo thêm **Timer Service Task**.
+
+* Vì không dùng heap, kernel yêu cầu người dùng cung cấp bộ nhớ tĩnh cho task này thông qua hook:
+
+			vApplicationGetTimerTaskMemory()
+
+*  **Cú pháp**
+
+		void vApplicationGetTimerTaskMemory(
+		    StaticTask_t **ppxTimerTaskTCBBuffer,
+		    StackType_t **ppxTimerTaskStackBuffer,
+		    uint32_t *pulTimerTaskStackSize
+		);
+
+
+	* **`StaticTask_t **ppxTimerTaskTCBBuffer`**: 
+	
+		* Con trỏ kép đến vùng nhớ TCB của Timer Task.
+		
+		* Timer Task cần TCB riêng để kernel quản lý task này như một task độc lập.
+	 
+		* Người dùng khai báo: 
+	
+				static StaticTask_t xTimerTaskTCB;
+
+		* Cung cấp cho kernel:
+	
+				*ppxTimerTaskTCBBuffer = &xTimerTaskTCB;
+
+
+						
+	*  **`StackType_t **ppxTimerTaskStackBuffer`**: 
+	
+		* Con trỏ kép đến stack buffer của Timer Task.
+		
+		* Timer Task thường cần stack lớn hơn Idle Task vì:
+				
+				Xử lý command queue
+				Chạy callback function
+
+		* Khai báo:
+	
+				static StackType_t uxTimerTaskStack[ configTIMER_TASK_STACK_DEPTH ];
+
+		* Cung cấp:
+	
+				*ppxTimerTaskStackBuffer = uxTimerTaskStack;
+
+
+	*  **`uint32_t *pulTimerTaskStackSize`** :
+	
+		* Con trỏ đến biến lưu kích thước stack Timer Task.
+		
+		* Giá trị lấy từ:
+		
+				configTIMER_TASK_STACK_DEPTH
+
+#####  **2.4.4. VD**
+
+		void vApplicationGetTimerTaskMemory(
+		    StaticTask_t **ppxTimerTaskTCBBuffer,
+		    StackType_t **ppxTimerTaskStackBuffer,
+		    uint32_t *pulTimerTaskStackSize )
+		{
+		    static StaticTask_t xTimerTaskTCB;
+		    static StackType_t uxTimerTaskStack[ configTIMER_TASK_STACK_DEPTH ];
+
+		    *ppxTimerTaskTCBBuffer   = &xTimerTaskTCB;
+		    *ppxTimerTaskStackBuffer = uxTimerTaskStack;
+		    *pulTimerTaskStackSize   = configTIMER_TASK_STACK_DEPTH;
+		}
+			
+   </details> 
+
 # CHƯƠNG 4: TASKS MANAGEMENT 
 <details>
     <summary><strong>BÀI 1: TASK FUNCTION, TASK CREATION AND STACK DEPTH</strong></summary>
