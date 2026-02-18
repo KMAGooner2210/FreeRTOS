@@ -806,6 +806,183 @@
 			
    </details> 
 
+<details>
+    <summary><strong>BÀI 3: HEAP MONITORING</strong></summary>
+
+## **BÀI 3: HEAP MONITORING**
+
+### **I.  Free Heap Monitoring**
+
+#### **1.1. xPortGetFreeHeapSize()**
+
+*	 Hàm trả về tổng dung lượng heap còn trống tại thời điểm gọi
+
+*	Cú pháp:
+
+			size_t xPortGetFreeHeapSize(void);
+
+*	Giá trị trả về:
+
+	   ◦   Số byte heap còn lại trong hệ thống
+
+ *	Đặc điểm:
+
+	   ◦   Có mặt trong tất cả heap schemes (`heap_1` đến `heap_5`)
+
+	   ◦   Chỉ phản ánh heap free tại thời điểm hiện tại
+
+	   ◦   Không đánh giá được fragmentation
+
+	   ◦   Thường dùng để log runtime hoặc debug khi tạo object mới
+
+*	VD:
+
+			void vHeapMonitor(void){
+				printf("Free Heap: %u bytes\r\n", (unsigned)xPortGetFreeHeapSize());
+			}
+				    
+#### **1.2. xPortGetMinimumEverFreeHeapSize()**
+
+*  Trả về dung lượng heap nhỏ nhất từng được ghi nhận kể từ khi hệ thống bắt đầu chạy
+
+* Cú pháp:
+
+		size_t xPortGetMinimumEverFreeHeapSize(void);
+
+* Đặc điểm:
+
+	*  Chỉ hỗ trợ trong `heap_4` và `heap_5`
+	
+	*  Là chỉ số quan trọng để đánh giá an toàn bộ nhớ 
+	
+	* Không bị thay đổi theo thời gian (luôn giữ mức thấp nhất)  
+	
+* VD:
+
+		void vHeapWatermarkCheck(void){
+			printf("Minimum Ever Free Heap: %u bytes\r\n",  (unsigned)xPortGetMinimumEverFreeHeapSize());
+		}
+	
+### **II.  Heap Statistics**
+
+#### **2.1. Fragmentation**
+
+*	 Phân mảnh heap xảy ra khi:
+		
+		*  Nhiều khối bộ nhớ nhỏ được cấp phát và giải phóng không đồng đều 
+		
+		* Heap bị chia thành nhiều block trống rời rạc 
+		
+		* Không còn block đủ lớn để cấp phát đối tượng mới   	
+
+*	VD:
+
+	* Heap còn trống tổng cộng: 5000 bytes
+	* Nhưng block lớn nhất chỉ: 200 bytes
+	* Khi hệ thống cần cấp phát 400 bytes -> thất bại 	
+
+#### **2.2. vPortGetHeapStats()**
+
+* Hàm này thu thập trạng thái heap hiện tại và ghi vào struct `HeapStats_t`
+
+* Cú pháp:
+
+			void vPortGetHeapStats(HeapStats_t *pxHeapStats);
+
+* Cấu trúc HeapStats_t:
+
+		typedef struct xHeapStats {
+			size_t xAvailableHeapSpaceInBytes;
+			size_t xSizeOfLargestFreeBlockInBytes;
+			size_t xSizeOfSmallestFreeBlockInBytes;
+			size_t xNumberOfFreeBlocks;
+			size_t xMinimumEverFreeBytesRemaining;
+		} HeapStats_t;
+
+* Tham số:
+
+	*  `xAvailableHeapSpaceInBytes:`
+	
+		* Đây là tổng dung lượng heap còn trống tại thời điểm gọi 
+		* Cho biết heap còn bao nhiêu RAM
+
+	
+	*  `xSizeOfLargestFreeBlockInBytes`
+	
+		* Nếu block lớn nhất quá nhỏ -> malloc lớn sẽ fail
+		* Chỉ số quan trọng nhất để phát hiện fragmentation
+		  
+	
+	*  `xNumberOfFreeBlocks`
+	
+		* Cho biết heap đang có bao nhiêu block trống rời rạc.
+		* FreeBlocks ít , heap còn liền mạch 
+		* FreeBlocks nhiều, heap bị chia nhỏ
+	
+	*  `xMinimumEverFreeBytesRemaining`
+	
+		* Mức heap thấp nhất từng đạt được
+		* Đánh giá mức độ an toàn dài hạn của hệ thống
+
+* VD:
+
+			void vPrintHeapStats(void){
+				HeapStats_t stats;
+				vPortGetHeapStats(&stats);
+	
+				printf("Free Heap: %u bytes\r\n", (unsigned)stats.xAvailableHeapSpaceInBytes);
+				printf("Largest Free Block: %u bytes\r\n", (unsigned)stats.xSizeOfLargestFreeBlockInBytes);
+				printf("Free Blocks: %u\r\n", (unsigned)stats.xNumberOfFreeBlocks);
+			}
+
+	* Giả sử log:
+		* Free Heap = 5000 bytes
+		* Largest Free Block = 200 bytes
+		* Free Blocks = 35
+		   
+### **III.  Allocation Failure Hook**
+
+#### **3.1. Khái niệm**
+
+*	 FreeRTOS cung cấp cơ chế callback hook , đây là một hàm do người dùng định nghĩa, được kernel gọi ngay khi malloc thất bại
+		
+			vApplicationMallocFailedHook()
+			
+*   Hàm này đóng vai trò như một cơ chế cảnh báo runtime, giúp phát hiện lỗi heap ngay lập tức	
+		
+#### **3.2. Điều kiện kích hoạt Hook**
+
+*  Hook chỉ hoạt động nếu bật cấu hình trong `FreeRTOSConfig.h`
+
+		#define configUSE_MALLOC_FAILED_HOOK 		1
+
+
+*  Nếu giá trị bằng 0, kernel sẽ không gọi hook 
+
+
+#### **3.3. Cơ chế hoạt động**
+
+*  Trong `pvPortMalloc()`, FreeRTOS có kiểm tra:
+
+		if (pvReturn == NULL){
+			vApplicationMallocFailedHook();
+		}
+
+	* Ngay khi allocation fail
+	* Hook sẽ được gọi tức thời 
+	* Hệ thống được đưa vào trạng thái debug
+
+#### **3.4. VD**
+
+			void vApplicationMallocFailedHook(void){
+			taskDISABLE_INTERRUPTS();
+			printf("ERROR: Heap exhausted or fragmented!\r\n");
+			while(1);
+			}
+			
+
+   </details> 
+   
 # CHƯƠNG 4: TASKS MANAGEMENT 
 <details>
     <summary><strong>BÀI 1: TASK FUNCTION, TASK CREATION AND STACK DEPTH</strong></summary>
