@@ -1979,290 +1979,64 @@
 			}
 
      </details> 
-# CHƯƠNG 5: QUEUE MANAGEMENT 
+
+
+# CHƯƠNG 5: TASK NOTIFICATIONS
 <details>
-    <summary><strong>BÀI 1: FUNDAMETALS AND OPERATING PRINCIPLES OF QUEUES</strong></summary>
+    <summary><strong>BÀI 1: ARCHITECTURE OVERVIEW</strong></summary>
 
-## **BÀI 1: FUNDAMETALS AND OPERATING PRINCIPLES OF QUEUES**
+## **BÀI 1: ARCHITECTURE OVERVIEW**
 
-### **I. Giới thiệu**
+### **I.  Direct-to-TCB Notification**
 
 #### **1.1. Khái niệm**
 
-*   **Queue (hàng đợi)** là một trong những cơ chế đồng bộ hóa và giao tiếp giữa các task (**Inter Task Communication - ITC**)
+*	 Trong FreeRTOS, Task Notification là cơ chế đồng bộ và báo hiệu được thiết kế để thay thế các IPC truyền thống như:
+		*	Queue
+		*	Semaphore
+		*	Event Group
 
-*   **Queue** cho phép các task hoặc ngắt (ISR) trao đổi dữ liệu một cách an toàn, đồng bộ, và hiệu quả mà không gây race condition (tình trạng dữ liệu bị hỏng do truy cập đồng thời)
+*  Notification không tạo ra một đối tượng IPC riêng, mà ghi trực tiếp vào Task Control Block (TCB) của task đích
 
-#### **1.2. Vai trò**
 
-*   Trong hệ thống đa nhiệm, các task thường chạy độc lập nhưng cần trao đổi thông tin:
+#### **1.2. Task Control Block (TCB)**
 
-    ◦   Task A đọc cảm biến -> gửi dữ liệu cho Task B xử lý
+*  Mỗi task trong FreeRTOS đều được kernel quản lý thông qua một cấu trúc dữ liệu trung tâm gọi là:
 
-    ◦   ISR nhận byte từ UART -> gửi cho task xử lý giao tiếp 
+			tskTaskControlBlock
 
-*   Nếu dùng biến toàn cục để chia sẻ dữ liệu:
+	* Lưu toàn bộ trạng thái cần thiết để scheduler điều khiển task đó
+	* TCB thường chứa:
+		* Con trỏ stack hiện tại
+		* Priority
+		* Trạng thái task
+		* Thông tin scheduling list
+		* Context switching metadata
 
-    ◦   Dễ xảy ra race condition (VD: Task A đang ghi biến thì Task B đọc -> dữ liệu cũ mới lẫn lộn)
+#### **1.3.Notification**
 
-    ◦   Cần thêm mutex/semaphore để bảo vệ
+*  Trong FreeRTOS, mỗi task có các trường notification như:
+	
+		uint32_t ulNotifiedValue;
+		uint8_t ucNotifyState;
+		
+	*  `ulNotifiedValue:` giá trị notification
+	*  `ucNotifyState:` trạng thái báo hiệu 
 
-*   Queue giúp giải quyết triệt để các vấn đề nhờ:
+#### **1.4.Cơ chế hoạt động trực tiếp**
 
-    ◦   Sao chép dữ liệu thay vì chia sẻ tham chiếu dẫn tới mỗi bên có bản sao riêng
+*  Khi một task hoặc ISR gửi notification:
 
-    ◦   Kernel FreeRTOS bảo vệ toàn bộ thao tác enqueue/dequeue 
+			xTaskNotify(xTaskHandle, value, eAction);
 
-    ◦   Task có thể chờ dữ liệu hoặc chỗ trống  giúp tiết kiệm CPU 
+*  Kernel sẽ thực hiện các bước:
+		
+	**1.** Truy cập trực tiếp TCB của task đích
+	**2.** Ghi giá trị vào `ulNotifiedValue`
+	**3.** Đặt trạng thái `ucNotifyState = notified`
+	**4.** Nếu task đang Blocked chờ notification -> Đưa về Ready
+	**5.** Scheduler có thể context switch ngay lập tức
 
-    ◦   Đảm bảo thứ tự dữ liệu logic (FIFO)
 
-#### **1.3. Phạm vi**
 
-*   Queue được thiết kế linh hoạt cho nhiều tình huống:
-
-    ◦   **Task-To-Task:** Producer gửi dữ liệu -> Consumer nhận
-
-        VD: Task cảm biến -> Task xử lý
-
-    ◦   **ISR-To-Task:** ISR gửi dữ liệu nhanh vào queue -> task xử lý chậm hơn 
-
-    ◦   **Task-To-ISR:** Do ISR không được phép block, cơ chế này chỉ được áp dụng cho việc truyền tín hiệu hoặc trạng thái điều khiển đơn giản
-
-    ◦   **Multiple producers / consumers:** Nhiều task gửi vào cùng queue, nhiều task nhận từ cùng queue
-
-    ◦   **Truyền dữ liệu kích thước cố định:** Kích thước phần tử được xác định ngay khi tạo Queue, mỗi lần gửi nhận thì kernel copy đúng số byte cố định
-
-### **II. Đặc điểm**
-
-#### **2.1. Lưu trữ dữ liệu**
-
-*   Queue lưu trữ bản sao hoàn toàn của dữ liệu (copy by value), không lưu tham chiếu
-
-        int value = 10;
-        xQueueSend(q, &value, 0);
-        value = 99;   // thay đổi biến gốc
-
-        int rx;
-        xQueueReceive(q, &rx, portMAX_DELAY);
-        // rx == 10
-
- 
-*   Mỗi item có kích thước cố định (xác định khi tạo queue)
-
-        QueueHandle_t q;
-        q = xQueueCreate(5, sizeof(float));  // mỗi item là float
-
-        float f = 3.14f;
-        xQueueSend(q, &f, 0);   // hợp lệ
-
-        int i = 10;
-        xQueueSend(q, &i, 0);   // Sai kiểu / sai kích thước
-
-
-
-*   Queue sử dụng bộ đệm có kích thước cố định, trong đó số lượng phần tử tối đa không thay đổi trong suốt vòng đời của hàng đợi
-
-        QueueHandle_t q;
-        q = xQueueCreate(3, sizeof(uint8_t));
-
-        xQueueSend(q, &a, 0);  // item 1
-        xQueueSend(q, &b, 0);  // item 2
-        xQueueSend(q, &c, 0);  // item 3
-        xQueueSend(q, &d, 0);  // queue full
-
-
-*   Hoạt động theo nguyên tắc FIFO
-
-        xQueueSend(q, &item1, 0);
-        xQueueSend(q, &item2, 0);
-        xQueueSend(q, &item3, 0);
-
-        xQueueReceive(q, &rx, portMAX_DELAY);  // rx = item1
-        xQueueReceive(q, &rx, portMAX_DELAY);  // rx = item2
-        xQueueReceive(q, &rx, portMAX_DELAY);  // rx = item3
-
-*   Cơ chế nội bộ:
-
-    ◦   Queue bao gồm một vùng bộ nhớ đệm + hai con trỏ: head (vị trí đọc) và tail (vị trí ghi)
-
-    ◦   Khi gửi: Sao chép dữ liệu vào tail -> tăng tail
-
-    ◦   Khi nhận: Sao chép dữ liệu từ head ra bộ nhớ của task nhận -> tăng head   
-
-    ◦   Trong suốt thao tác gửi / nhận, kernel bảo vệ hàng đợi bằng cơ chế nội bộ (tạm thời vô hiệu hóa ngắt hoặc sử dụng vùng bảo vệ thích hợp), đảm bảo an toàn ngay cả với các phần tử có kích thước lớn 
-
-#### **2.2. Truy cập bởi nhiều tác vụ**
-
-*   **Thread-Safe:**
-
-    ◦   Nhiều task có thể đồng thời gửi và nhận dữ liệu mà không gây ra xung đột hay lỗi dữ liệu   
-
-    ◦   Kernel tự động bảo vệ toàn bộ thao tác enqueue/dequeue bằng các cơ chế đồng bộ nội bộ, đảm bảo tính toàn vẹn dữ liệu
-
-        xQueueSend(sensorQueue, &sensorData, 0);        // Task A
-        xQueueSend(statusQueue, &statusData, 0);        // Task B
-        xQueueSendFromISR(eventQueue, &event, NULL);    // ISR
-
-*   **Multiple Producers:**
-
-    ◦   Nhiều task có thể đồng thời gửi dữ liệu vào cùng một hàng đợi
-
-    ◦   Kernel đảm bảo các phần tử được xếp vào queue theo đúng thứ tự FIFO dựa trên thời điểm gửi
-
-        // Task A: đọc cảm biến nhiệt độ
-
-        void TempTask(void *arg)
-        {
-            int temp;
-            while (1)
-            {
-                temp = readTemperature();
-                xQueueSend(dataQueue, &temp, portMAX_DELAY);
-            }
-        }
-
-        // Task B: đọc cảm biến độ ẩm
-
-        void HumiTask(void *arg)
-        {
-            int humi;
-            while (1)
-            {
-                humi = readHumidity();
-                xQueueSend(dataQueue, &humi, portMAX_DELAY);
-            }
-        }
-
-        // Cả hai gửi về Task xử lý trung tâm
-
-        void ProcessingTask(void *arg)
-        {
-            int value;
-            while (1)
-            {
-                xQueueReceive(dataQueue, &value, portMAX_DELAY);
-                process(value);
-            }
-        }
-
-*   **Multiple Consumers:**
-
-    ◦   có thể cùng chờ nhận dữ liệu từ một queue
-
-    ◦   Khi có phần tử mới, task ở trạng thái sẵn sàng (Ready) với mức ưu tiên phù hợp sẽ nhận phần tử đầu tiên trong hàng đợi.
-
-        // Task Logger: ghi log
-
-        void LoggerTask(void *arg)
-        {
-            Event_t event;
-            while (1)
-            {
-                xQueueReceive(eventQueue, &event, portMAX_DELAY);
-                logEvent(event);
-            }
-        }
-
-        // Task Display: cập nhật màn hình
-
-        void DisplayTask(void *arg)
-        {
-            Event_t event;
-            while (1)
-            {
-                xQueueReceive(eventQueue, &event, portMAX_DELAY);
-                updateDisplay(event);
-            }
-        }
-
-
-#### **2.3. Chặn khi đọc Queue**
-
-*   Khi queue rỗng và task gọi hàm `xQueueReceive()`, hành vi của hệ thống phụ thuộc vào giá trị timeout:
-
-    ◦   Timeout = 0 -> Hàm trả về errQUEUE_EMPTY, task không bị chặn 
-
-    ◦   Timeout > 0 hoặc portMAX_DELAY -> Task được chuyển sang trạng thái Blocked và được đưa vào danh sách chờ đọc của hàng đợi 
-
-    ◦   Khi có dữ liệu mới được gửi vào queue (gửi thành công):
-
-        Kernel đánh thức task có mức ưu tiên cao nhất trong danh sách chờ đọc, chuyển task đó sang trạng thái Ready
-
-        Bộ lập lịch sẽ thực thi task ngay nếu điều kiện ưu tiên cho phép.
-
-
-#### **2.4. Chặn khi ghi Queue**
-
-*   Khi hàng đợi đã đầy và một task gọi hàm gửi dữ liệu (`xQueueSend()` hoặc `xQueueSendToBack()`), hành vi của hệ thống phụ thuộc vào giá trị timeout:
-
-    ◦   Timeout = 0 -> Hàm trả về errQUEUE_FULL, task không bị chặn 
-
-    ◦   Timeout > 0 hoặc portMAX_DELAY -> Task được chuyển sang trạng thái Blocked và được đưa vào danh sách chờ ghi của hàng đợi 
-
-    ◦   Khi có chỗ trống trong queue (do một thao tác nhận dữ liệu thành công):
-
-        Kernel cho phép task đang chờ ghi thực hiện thao tác gửi, sau đó đánh thức task đó và chuyển nó sang trạng thái Ready
-
-        Bộ lập lịch sẽ thực thi task ngay nếu điều kiện ưu tiên cho phép.
-
-#### **2.5. Chặn trên nhiều Queue**
-
-*   Trong nhiều hệ thống RTOS, một task có thể cần chờ dữ liệu từ nhiều nguồn khác nhau, mỗi nguồn được truyền qua một hàng đợi riêng biệt.
-
-    ◦   Nếu dùng receive thông thường → task bị block tại queue đầu tiên, có thể bỏ lỡ dữ liệu từ queue khác.
-
-    ◦   FreeRTOS cung cấp Queue Set để block trên toàn bộ tập hợp queue → thức dậy khi bất kỳ queue nào có sự kiện.
-
-*   Quy trình hoạt động
-
-    ◦   Tạo một Queue Set
-
-    ◦   Thêm các queue cần theo dõi vào Queue Set
-
-    ◦   Task gọi xQueueSelectFromSet() để block
-
-    ◦   Khi có sự kiện:
-
-        Hàm trả về queue nào đã kích hoạt
-
-        Task tiếp tục gọi xQueueReceive() trên queue đó
-
-#### **2.6. Tạo Queue**
-
-##### **2.6.1. Dynamic Allocation**
-
-*   **Nguyên lý hoạt động:**
-
-    ◦   Bộ nhớ cho Queue Control Block (QCB) và vùng lưu trữ item được cấp phát từ heap của hệ thống tại thời điểm chạy (runtime).
-
-    ◦   Việc cấp phát được thực hiện thông qua hàm `pvPortMalloc()` nội bộ.
-
-*   **Đặc điểm:**
-
-    ◦   Bộ nhớ chỉ được cấp phát khi hàm tạo queue được gọi
-
-    ◦   Nếu heap không đủ dung lượng, việc tạo queue sẽ thất bại
-
-    ◦   Bộ nhớ có thể bị phân mảnh trong hệ thống chạy lâu dài
-
-
-##### **2.6.2. Static Allocation:**
-
-*   **Nguyên lý hoạt động:**
-
-    ◦   Toàn bộ bộ nhớ cần thiết cho queue được cấp phát sẵn bởi lập trình viên
-
-        Bộ nhớ cho Queue Control Block
-
-        Bộ đệm lưu trữ item
-
-    ◦   FreeRTOS không thực hiện bất kỳ thao tác cấp phát heap nào trong suốt vòng đời của queue.
-
-*   **Đặc điểm:**
-
-    ◦   Bộ nhớ được cấp phát: Tại compile-time hoặc ngay khi khởi động hệ thống
-
-    ◦   Kích thước queue: Số lượng item tối đa, kích thước mỗi item
-
-     </details> 
+   </details> 
