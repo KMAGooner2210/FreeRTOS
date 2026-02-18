@@ -9,17 +9,25 @@
 
 #### **1.1. Khái niệm**
 
-*   Trong FreeRTOS, kernel cần sử dụng RAM để tạo và quản lý các đối tượng hệ điều hành (kernel objects), ví dụ:
- 
-    ◦   **Task**: gồm Task Control Block (TCB) + stack riêng
+*	Trong hệ điều hành thời gian thực FreeRTOS, bộ nhớ đóng vai trò quyết định đến tính ổn định và độ tin cậy của hệ thống
+  
+*	Heap là vùng bộ nhớ được FreeRTOS sử dụng để cấp phát động cho các đối tượng kernel trong quá trình chạy.
+  
+*	Việc quản lý heap không hiệu quả có thể dẫn đến các lỗi nghiêm trọng như không tạo được task, hệ thống treo hoặc reset bất ngờ.
+  
+*   Trong FreeRTOS, heap là vùng RAM dành riêng cho cơ chế cấp phát động, được sử dụng khi hệ thống cần tạo các đối tượng kernel tại runtime.
 
-    ◦   **Queue / Message Buffer**
+*   Heap khác với stack của từng task và khác với vùng dữ liệu tĩnh/global, các thành phần quan trọng sử dụng heap bao gồm:
  
-    ◦   **Semaphore / Mutex**
+    ◦   **Task Control Block (TCB):** cấu trúc quản lý thông tin task
 
-    ◦   **Software Timer**
+    ◦   **Task Stack:** vùng stack riêng cho từng task nếu không cấp phát tĩnh
  
-    ◦   **Event Group**
+    ◦   **Queue và Message Buffer:** phục vụ truyền dữ liệu giữa các task
+
+    ◦   **Semaphore và Mutex:** đồng bộ truy cập tài nguyên
+ 
+    ◦   **Software Timer và Event Group:** quản lý sự kiện và thời gian
         
 *  FreeRTOS hỗ trợ hai chiến lược quản lý bộ nhớ chính:
 
@@ -28,53 +36,78 @@
     ◦   **Static Allocation (User-provided buffers)**
 
  
-#### **1.2. Đặc điểm**
+#### **1.2. Vai trò**
  
-* Heap trong FreeRTOS không phải heap chuẩn của C
+* 	Heap đóng vai trò nền tảng trong việc khởi tạo và vận hành các đối tượng kernel của FreeRTOS trong quá trình runtime.
 
-*  FreeRTOS không bắt buộc dùng `malloc()` của libc.
+*  	Khi lập trình viên tạo task hoặc các object giao tiếp, FreeRTOS sẽ tự động sử dụng heap để cấp phát vùng nhớ cần thiết.
 
-* Thay vào đó, nó cung cấp heap riêng thông qua: `heap_1.c`, `heap_2.c`, `heap_3.c`, `heap_4.c`, `heap_5.c`
+* 	Ví dụ, khi gọi hàm: `xTaskCreate(...)` thì Kernel sẽ cấp phát bộ nhớ heap để tạo:
 
-* Heap size được cấu hình qua:
+    ◦   vùng TCB
+  	
+    ◦   vùng stack cho task
+
+* 	Tương tự, khi gọi: `xQueueCreate(...)`, FreeRTOS cũng sẽ cấp phát heap để khởi tạo queue object.
+
+#### **1.3. Rủi ro**
+
+##### **1.3.1. Heap Exhaustion**
+ 
+* 	Heap exhaustion xảy ra khi hệ thống không còn đủ bộ nhớ trống để cấp phát thêm đối tượng mới
+
+*  	Khi đó, các hàm cấp phát như `pvPortMalloc()` sẽ trả về NULL, dẫn đến việc tạo task hoặc queue thất bại.
+
+* 	Hậu quả của heap exhaustion có thể bao gồm:
+
+    ◦   Task không được khởi tạo
+
+    ◦   Hệ thống mất chức năng quan trọng
+
+    ◦   Reset hoặc crash bất ngờ
+
+##### **1.3.2. Memory Fragmentation**
+ 
+* 	Fragmentation là hiện tượng heap bị chia nhỏ thành nhiều block rời rạc sau nhiều lần cấp phát và giải phóng.
+
+* 	Ví dụ:
+
+    ◦   Tổng heap còn trống 5000 byte
+
+    ◦   Nhưng block liên tục lớn nhất chỉ còn 200 byte
+
+    ◦   Task cần stack 512 byte → cấp phát thất bại
+
+
+#### **1.4. Đặc điểm**
+ 
+* 	Heap trong FreeRTOS không phải heap chuẩn của thư viện C.
+
+*  	FreeRTOS không bắt buộc sử dụng `malloc()` và `free()` của libc mà cung cấp cơ chế quản lý heap riêng phù hợp hơn cho các hệ thống nhúng.
+
+* 	FreeRTOS hỗ trợ nhiều heap scheme khác nhau thông qua các file:
+
+    ◦   heap_1.c
+
+    ◦   heap_2.c
+
+    ◦   heap_3.c
+
+    ◦   heap_4.c
+
+    ◦   heap_5.c
+
+* 	Dung lượng heap được cấu hình trong `FreeRTOSConfig.h`:
 
 		#define configTOTAL_HEAP_SIZE (10 * 1024)
-		
-    ◦   Đơn vị: bytes
-    ◦   Heap này được dùng để cấp phát object nếu bật dynamic allocation
- 
 
+    ◦   Đơn vị tính: byte
+
+    ◦   Heap này được kernel sử dụng để cấp phát các object nếu bật dynamic allocation
+  	
 ### **II.  Heap Management Schemes**
 
-#### **2.1. Khái niệm**
-
-*   FreeRTOS không bắt buộc sử dụng `malloc()` và `free()` của thư viện C chuẩn
-
-*    Thay vào đó, kernel cung cấp nhiều cơ chế quản lý heap riêng để phù hợp với các hệ thống embedded có yêu cầu khác nhau về 
-
-	    ◦   Tính ổn định bộ nhớ
-	     
-	    ◦   Khả năng dự đoán
-
-	    ◦   Mức độ fragmentation
-	     
-	    ◦   Giới hạn tài nguyên RAM
-	    
-*    FreeRTOS cung cấp 5 file triển khai heap, đặt tên theo dạng
-
-	    ◦   **heap_1.c**
-
-	    ◦   **heap_2.c**  
-
-	    ◦   **heap_3.c**
-
-	    ◦   **heap_4.c** 
-
-	    ◦   **heap_5.c**
-
-#### **2.2. Phân loại**
-
-#####  **2.2.1. Heap_1**
+####  **2.1. Heap_1**
 
 * **Khái niệm:**
 	
@@ -151,7 +184,7 @@
        vTaskStartScheduler();
        while(1);
        }
-#####  **2.2.2. Heap_2**
+####  **2.2. Heap_2**
 
 * **Khái niệm:**
 	
@@ -251,7 +284,7 @@
 					}
 				}
 
-#####  **2.2.3. Heap_3**
+####  **2.3. Heap_3**
 
 * **Khái niệm:**
 	
@@ -318,7 +351,7 @@
 					vTaskDelete(NULL);
 				}	
 					
-#####  **2.2.4. Heap_4**
+####  **2.4. Heap_4**
 
 * **Khái niệm:**
 	
@@ -431,7 +464,7 @@
 				}
 			}
 
-#####  **2.2.5. Heap_5**
+####  **2.5. Heap_5**
 
 * **Khái niệm:**
 	
