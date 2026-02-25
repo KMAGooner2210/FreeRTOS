@@ -2305,4 +2305,206 @@
    </details> 
 
 
+<details>
+    <summary><strong>BÀI 2: MODE 1 – LIGHTWEIGHT SEMAPHORE</strong></summary>
+
+## **BÀI 2: MODE 1 – LIGHTWEIGHT SEMAPHORE**
+
+### **I.  SIGNALING (BÁO HIỆU)**
+
+#### **1.1. Nguyên lý thiết kế**
+
+*	Ở chế độ này, Task Notification được sử dụng như:
+
+	*	Một **cờ sự kiện (flag)**
+	
+	*  Hoặc một **biến đếm sự kiện (counter)**	
+
+*  Được sử dụng để báo 
+
+	*  Đã hoàn thành
+	
+	*  Có dữ liệu mới
+	
+	*  Ngắt đã xảy ra
+	
+	*  Tài nguyên đã sẵn sàng    
+
+*  Đây chính là hành vi của:
+
+	*  Binary Semaphore
+	
+	*  Counting Semaphore
+
+#### **1.2. Thiết kế**
+
+##### **1.2.1. Semaphore**
+
+		xSemaphoreGive(binarySem);
+		xSemaphoreTake(binarySem, portMAX_DELAY);
+
+##### **1.2.2. Notification**
+
+		xTaskNotifyGive(taskHandle);
+		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+### **II.  API CẤP NHIỆM VỤ (TASK-LEVEL APIs)**
+
+#### **2.1. Gửi tín hiệu: `xTaskNotifyGive()`**
+
+* `xTaskNotifyGive()` thực chất tương đương:
+
+		xTaskNotify(taskHandle, 0, eIncrement);
+
+* Kernel sẽ:
+
+	* Vào critical section.
+	
+	* Tăng `ulNotifiedValue` lên 1.
+	
+	* Cập nhật `ucNotifyState`.
+	
+	* Nếu Task đang Blocked → chuyển sang Ready.
+
+* **VD: Task A báo hoàn thành cho Task B**
+
+		static TaskHandle_t consumerHandle;
+
+		void vProducerTask(void *pvParameters)
+		{
+		    for (;;)
+		    {
+		        performAcquisition();
+
+		        xTaskNotifyGive(consumerHandle);
+		    }
+		}
+
+		void vConsumerTask(void *pvParameters)
+		{
+		    for (;;)
+		    {
+		        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+		        processData();
+		    }
+		}
+
+#### **2.2. Chờ tín hiệu: `ulTaskNotifyTake()`**
+
+		uint32_t ulTaskNotifyTake(BaseType_t xClearCountOnExit,
+		                          TickType_t xTicksToWait);
+
+* Tham số `xClearCountOnExit`
+
+	* Trường hợp 1: `pdTRUE` – Binary Mode
+	
+		*  Sau khi nhận, giá trị bị xóa về 0.
+	
+		*  Hoạt động giống Binary Semaphore.
+		
+				ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+		
+		* Phù hợp khi:
+		
+			*   Mỗi lần chỉ cần một tín hiệu.
+			
+			*   Không cần biết có bao nhiêu lần sự kiện xảy ra. 
+
+	* Trường hợp 2: `pdFALSE` – Counting Mode
+	
+		*  Sau khi nhận, giá trị giảm đi 1.
+	
+		*  Nếu trước đó giá trị là 3 → trả về 3.
+		
+		*  Sau khi thoát → còn 2. 
+		
+				uint32_t pendingEvents;
+
+				pendingEvents = ulTaskNotifyTake(pdFALSE, portMAX_DELAY);
+
+		* Phù hợp khi:
+		
+			*   Có thể xảy ra nhiều sự kiện liên tiếp.
+			
+			*   Cần xử lý đủ số lần sự kiện.
+
+* Tham số `xTicksToWait`
+
+	* Cho phép:
+	
+		*  0 → không chờ (non-blocking)
+	
+		*  `portMAX_DELAY` → chờ vô hạn
+		
+		*   Giá trị cụ thể → timeout
+		
+	* Kernel sẽ:
+	
+		* Nếu `ulNotifiedValue == 0`
+		
+			*  Đưa Task vào Blocked List
+			
+		*  Khi có Notification:
+		
+			*  Đưa Task về Ready List 
+
+							
+### **III.  KỸ THUẬT XỬ LÝ NGẮT (ISR HANDLING)**
+
+#### **3.1. API chuyên dụng: `vTaskNotifyGiveFromISR()`**
+
+* Dùng trong ISR:
+
+		void vTaskNotifyGiveFromISR(TaskHandle_t xTaskToNotify,
+		                            BaseType_t *pxHigherPriorityTaskWoken);
+
+	*  Tăng `ulNotifiedValue`.
+	
+	*  Nếu Task đích có ưu tiên cao hơn:
+	
+		*  `*pxHigherPriorityTaskWoken = pdTRUE`.
+	
+	*  Sau đó cần:
+	
+			portYIELD_FROM_ISR(pxHigherPriorityTaskWoken);
+
+#### **3.2. Mô hình Deferred Interrupt Processing**
+
+* Bước 1 – ISR
+
+	*   Xóa cờ ngắt phần cứng.
+	
+	*   Gửi Notification.
+	
+	*   Thoát nhanh.
+	
+			void DMA_IRQHandler(void)
+			{
+			    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+			    clearHardwareFlag();
+
+			    vTaskNotifyGiveFromISR(processTaskHandle,
+			                           &xHigherPriorityTaskWoken);
+
+			    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+			}
+
+
+
+* Bước 2 – Task xử lý
+	
+			void vProcessingTask(void *pvParameters)
+			{
+			    for (;;)
+			    {
+			        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+			        heavyComputation();
+			    }
+			}
+
+	*   Toàn bộ logic nặng được chuyển ra ngoài ISR.
+	
    </details> 
