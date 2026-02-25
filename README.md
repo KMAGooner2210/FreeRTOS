@@ -1987,56 +1987,322 @@
 
 ## **BÀI 1: ARCHITECTURE OVERVIEW**
 
-### **I.  Direct-to-TCB Notification**
+### **I.  UNMEDIATED - DIRECT TO TCB**
 
 #### **1.1. Khái niệm**
 
-*	 Trong FreeRTOS, Task Notification là cơ chế đồng bộ và báo hiệu được thiết kế để thay thế các IPC truyền thống như:
-		*	Queue
-		*	Semaphore
-		*	Event Group
+*	 **Task Notification** là cơ chế đồng bộ và truyền tín hiệu trong đó nhân hệ điều hành ghi trực tiếp vào khối điều khiển tác vụ (**Task Control Block – TCB**) của tác vụ nhận.
 
-*  Notification không tạo ra một đối tượng IPC riêng, mà ghi trực tiếp vào Task Control Block (TCB) của task đích
+*  Cơ chế này không thông qua một đối tượng trung gian như **Queue** hay **Semaphore**.
 
 
 #### **1.2. Task Control Block (TCB)**
 
-*  Mỗi task trong FreeRTOS đều được kernel quản lý thông qua một cấu trúc dữ liệu trung tâm gọi là:
+##### **1.2.1. Thành phần quản lý tác vụ**
 
-			tskTaskControlBlock
+*  TCB là cấu trúc dữ liệu mà nhân hệ điều hành sử dụng để quản lý toàn bộ vòng đời của một tác vụ.
 
-	* Lưu toàn bộ trạng thái cần thiết để scheduler điều khiển task đó
-	* TCB thường chứa:
-		* Con trỏ stack hiện tại
-		* Priority
-		* Trạng thái task
-		* Thông tin scheduling list
-		* Context switching metadata
+*  Trong TCB chứa các thông tin cơ bản:
 
-#### **1.3.Notification**
-
-*  Trong FreeRTOS, mỗi task có các trường notification như:
+	* Con trỏ ngăn xếp (Stack pointer)
+		
+	* Mức ưu tiên (Priority)
+		
+	* Trạng thái thực thi (Task state)
+		
+	* Danh sách phục vụ bộ lập lịch (Scheduler lists)
+		
+	* Vùng Notification tích hợp sẵn
 	
-		uint32_t ulNotifiedValue;
-		uint8_t ucNotifyState;
+* Mỗi Task trong FreeRTOS có một cấu trúc:
+	
+		TCB_t
+
+*  Trong đó:
+
+		typedef struct tskTaskControlBlock
+		{
+			...
+			volatile uint32_t ulNotifiedValue;
+			volatile uint8_t ucNotifyState;
+			...
+		} TCB_t; 
+
+##### **1.2.2. Giá trị thông báo (ulNotifiedValue)**
+
+*  `ulNotifiedValue` là biến 32-bit nằm trong TCB
+
+*   Có thể hoạt động theo nhiều chế độ:
+	
+	*  Giá trị đơn (single value)
+	
+	*  Bộ đếm sự kiện (event counter)
+	
+	*  Tập bit sự kiện (bitwise event flags)
+	
+*   Vì biến này tồn tại cố định trong TCB nên:
+
+	*   Không cần cấp phát heap
+	
+	*   Không cần buffer riêng
+	
+	*   Không cần copy dữ liệu qua object trung gian 
+
+##### **1.2.3. Trạng thái thông báo (ucNotifyState)**
+
+*  `ucNotifyState` biểu diễn trạng thái điều khiển logic chờ/nhận:
+
+	*  `taskNOT_WAITING_NOTIFICATION`
+	
+	*  `taskWAITING_NOTIFICATION`
+	
+	*   `taskNOTIFICATION_RECEIVED`
+	
+* Kernel sử dụng trường này để:
+
+	*  Quyết định có chuyển Task sang trạng thái Ready hay không
+	
+	*  Kiểm soát việc ghi đè dữ liệu
+
+#### **1.3.Mô hình kiến trúc**
+
+##### **1.3.1.Mô hình Queue/Semaphore**
+
+*  Task Sender -> IPC Object -> Task Receiver
+
+*  Luồng xử lý:
+
+	* Ghi dữ liệu vào object.
+	
+	* Cập nhật danh sách chờ (Wait List).
+	
+	* Sao chép dữ liệu.
+	
+	* Đánh thức Task nhận.
+	
+* IPC object có cấu trúc riêng:
+
+	* Danh sách task chờ gửi
+	
+	* Danh sách task chờ nhận
+	
+	* Con trỏ buffer
+	
+	* Biến chỉ số đọc/ghi
+
+##### **1.3.2. Mô hình Task Notification**
+
+*  Task A → TCB của Task B
+
+*  Luồng xử lý:
+
+	* Kernel truy cập trực tiếp TCB.
+	
+	* Ghi vào `ulNotifiedValue`.
+	
+	* Cập nhật `ucNotifyState`.
+	
+	* Nếu cần → chuyển Task B sang Ready List.
+	
+* Không tồn tại object trung gian.
+
+* Không tồn tại hàng đợi.
+
+* Không có cấu trúc dữ liệu bổ sung.
+
+### **II.  CƠ CHẾ THỰC THI TRONG KERNEL**
+
+#### **2.1. Khi gửi Notification**
+
+		xTaskNotify(targetHandle,
+		            1,
+		            eIncrement);
+
+* Các bước kernel thực hiện:
+
+	* Vào vùng bảo vệ tới hạn (critical section).
+	
+	* Truy cập TCB qua `targetHandle`.
+	
+	* Cập nhật `ulNotifiedValue`.
+	
+	* Cập nhật `ucNotifyState`.    
+	
+	* Nếu Task đang Blocked:
+	
+		*  Xóa khỏi danh sách chờ
 		
-	*  `ulNotifiedValue:` giá trị notification
-	*  `ucNotifyState:` trạng thái báo hiệu 
-
-#### **1.4.Cơ chế hoạt động trực tiếp**
-
-*  Khi một task hoặc ISR gửi notification:
-
-			xTaskNotify(xTaskHandle, value, eAction);
-
-*  Kernel sẽ thực hiện các bước:
+		*  Thêm vào Ready List
 		
-	**1.** Truy cập trực tiếp TCB của task đích
-	**2.** Ghi giá trị vào `ulNotifiedValue`
-	**3.** Đặt trạng thái `ucNotifyState = notified`
-	**4.** Nếu task đang Blocked chờ notification -> Đưa về Ready
-	**5.** Scheduler có thể context switch ngay lập tức
+	*  Thoát critical section.
+	
+	*  Có thể kích hoạt chuyển ngữ cảnh (context switch).
+	
+*  Không có thao tác:
 
+	*  enqueue
+	
+	*  dequeue
+	
+	*  sao chép buffer
+
+#### **2.2. Khi Task chờ Notification**
+
+		xTaskNotifyWait(0,
+		                0xFFFFFFFF,
+		                &receivedValue,
+		                portMAX_DELAY);
+
+* Kernel:
+
+	* Kiểm tra `ucNotifyState`.
+	
+	* Nếu chưa có thông báo:
+	
+		*  Đặt trạng thái WAITING
+		
+		*  Chuyển Task sang Blocked List
+
+	*  Khi có thông báo:
+	
+		*  Sao chép `ulNotifiedValue`
+		
+		*   Cập nhật lại trạng thái
+		
+		*   Xóa bit theo cấu hình 
+
+### **III.  HIỆU SUẤT VÀ TÍNH TỐI ƯU**
+
+#### **3.1. Độ trễ (Latency)**
+
+* Notification thường nhanh hơn khoảng 40–50% so với Binary Semaphore vì:
+
+	*  Không quản lý hai danh sách chờ
+	
+	*  Không thao tác trên buffer
+	
+	*  Không copy dữ liệu
+	
+	*  Số bước kernel ít hơn
+	
+*  Chi phí thời gian của Notification gần tương đương:
+
+	*  Ghi một biến 32-bit + cập nhật trạng thái Task
+
+#### **3.2. Tính xác định thời gian**
+
+* Queue:
+
+	*  Phụ thuộc kích thước buffer
+	
+	*  Phụ thuộc trạng thái full/empty
+	
+	*   Có thể lặp lại thao tác kiểm tra
+
+* Notification:
+
+	* Không phụ thuộc độ dài hàng đợi
+	
+	* Không có vòng lặp xử lý
+	
+	* Số bước cố định  
+
+#### **3.3. Tối ưu bộ nhớ (RAM Efficiency)**
+
+* Queue cần:
+
+	*  Cấu trúc Queue object (~70–80 byte)
+	
+	*  Buffer lưu dữ liệu
+	
+	* 	Danh sách chờ
+	
+*  Notification:
+	
+	*  Không cấp phát thêm bộ nhớ
+	
+	*  Tận dụng trường có sẵn trong TCB
+	
+*  Do đó:
+
+	*  Không phát sinh lỗi `errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY`
+	
+	*  Phù hợp hệ thống RAM hạn chế
+
+### **IV.  GIỚI HẠN KIẾN TRÚC**
+
+#### **4.1. One-to-One Binding**
+
+* Mỗi Notification gắn với một Task cụ thể.
+
+* Không thể broadcast tới nhiều Task.
+
+#### **4.2. No True Buffering**
+
+* Chỉ tồn tại:
+
+	*  Một biến 32-bit
+
+* Nếu Task nhận xử lý chậm:
+
+	*  Có thể bị ghi đè (overwrite mode)
+	
+	*  Hoặc bỏ lỡ sự kiện
+	
+* Không thể lưu nhiều payload như Queue.
+
+#### **4.3. Giới hạn kích thước dữ liệu**
+
+* Chỉ truyền được 32-bit.
+
+*  Không phù hợp truyền struct lớn.
+
+#### **4.4. Ràng buộc hướng truyền**
+
+*  ISR không có TCB.
+
+*  Không thể gửi Notification tới ISR.
+
+*  Chỉ hỗ trợ:
+
+	*   Task → Task
+	
+	*   ISR → Task
+
+### **V. VÍ DỤ**
+
+* **ISR đánh thức Task xử lý dữ liệu**
+
+		static TaskHandle_t processingTaskHandle;
+
+		void vProcessingTask(void *pvParameters)
+		{
+		    uint32_t value;
+
+		    for (;;)
+		    {
+		        xTaskNotifyWait(0,
+		                        0xFFFFFFFF,
+		                        &value,
+		                        portMAX_DELAY);
+
+		        processData();
+		    }
+		}
+
+		void DMA_IRQHandler(void)
+		{
+		    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+		    xTaskNotifyFromISR(processingTaskHandle,
+		                       0,
+		                       eNoAction,
+		                       &xHigherPriorityTaskWoken);
+
+		    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+		}
+
+   </details> 
 
 
    </details> 
