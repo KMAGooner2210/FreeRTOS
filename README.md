@@ -2508,3 +2508,203 @@
 	*   Toàn bộ logic nặng được chuyển ra ngoài ISR.
 	
    </details> 
+
+
+<details>
+    <summary><strong>BÀI 3: MODE 2 – VALUED NOTIFICATIONS</strong></summary>
+
+## **BÀI 3: MODE 2 – VALUED NOTIFICATIONS**
+
+### **I.  VALUED NOTIFICATION**
+
+#### **1.1. Giới thiệu**
+
+*	Khác với chế độ Signaling (chỉ tăng biến đếm), chế độ này khai thác đầy đủ biến:
+
+			ulNotifiedValue (32-bit)
+
+#### **1.2. Truyền giá trị 32-bit**
+
+* Dùng Notification để truyền:
+
+	*	Mã lệnh điều khiển (Command ID)
+	
+	*  Mã lỗi (Error Code)	
+
+	*  Giá trị cảm biến (ADC sample)
+
+	*  Trạng thái hệ thống (System State)
+	
+	*  Con trỏ tới buffer (trong thiết kế nâng cao)
+
+			xTaskNotify(controlTaskHandle,
+			            CMD_START,
+			            eSetValueWithOverwrite);
+
+#### **1.3. Bitmasking – Thay thế Event Group**
+
+* Biến 32-bit có thể chia thành 32 cờ sự kiện:
+
+			Bit 0 → ADC Done
+			Bit 1 → UART RX
+			Bit 2 → Timeout
+			Bit 3 → Sensor Error
+			...
+
+* Sử dụng phép OR để gộp nhiều sự kiện.
+
+* VD:
+
+		#define EVT_ADC_DONE     (1 << 0)
+		#define EVT_UART_RX      (1 << 1)
+		#define EVT_TIMEOUT      (1 << 2)
+
+* Gửi:
+
+		xTaskNotify(taskHandle,
+		            EVT_ADC_DONE,
+		            eSetBits);
+
+* Nhận:
+
+		xTaskNotifyWait(0,
+		                0xFFFFFFFF,
+		                &eventFlags,
+		                portMAX_DELAY);
+		            
+### **II.  HỆ THỐNG API TRUYỀN DỮ LIỆU**
+
+#### **2.1. Gửi dữ liệu: `xTaskNotify()`**
+
+		BaseType_t xTaskNotify(TaskHandle_t xTaskToNotify,
+		                       uint32_t ulValue,
+		                       eNotifyAction eAction);
+
+* Tham số:
+
+	* `xTaskToNotify` → Task nhận
+	
+	* `ulValue` → Giá trị truyền
+	
+	* `eAction` → Cách xử lý giá trị
+
+* Luồng thực thi kernel
+
+	* Vào critical section.
+	
+	* Truy cập TCB.
+	
+	* Thực hiện hành động theo `eAction`.
+
+	* Cập nhật `ucNotifyState`.
+	
+	* Nếu Task đang Blocked → đưa vào Ready List.
+	
+	* Thoát critical section.
+	
+
+
+#### **2.2. Nhận dữ liệu: `xTaskNotifyWait()`**
+
+		BaseType_t xTaskNotifyWait(uint32_t ulBitsToClearOnEntry,
+		                           uint32_t ulBitsToClearOnExit,
+		                           uint32_t *pulNotificationValue,
+		                           TickType_t xTicksToWait);
+
+* Tham số `ulBitsToClearOnEntry`
+
+	* Xóa các bit trước khi chờ.
+	
+		*  Làm sạch trạng thái cũ.
+	
+		*  Bảo đảm không xử lý sự kiện tồn dư.
+		
+* Tham số `ulBitsToClearOnExit`
+
+	* Xóa các bit sau khi nhận.
+	
+	*  Thường dùng: 0xFFFFFFFF
+	
+	*  Để xóa toàn bộ sau khi đọc.
+
+* Tham số `pulNotificationValue`
+
+	* Con trỏ nhận giá trị 32-bit.
+	
+	*  Kernel sẽ:
+	
+		*  Sao chép `ulNotifiedValue` vào biến này.
+		*  Thực hiện xóa bit theo cấu hình.
+
+							
+### **III.  PHÂN TÍCH CÁC HÀNH ĐỘNG THÔNG BÁO (eNotifyAction)**
+
+#### **3.1.`eSetBits` – Gộp sự kiện**
+
+			ulNotifiedValue |= ulValue;
+
+*  Đặc điểm:
+	
+	*  Không mất sự kiện nếu nhiều nguồn gửi khác nhau.
+	
+	* Có thể tích lũy nhiều bit trước khi Task xử lý.
+	
+*  VD:
+	
+			xTaskNotify(sensorTaskHandle,
+            EVT_ADC_DONE | EVT_UART_RX,
+            eSetBits);
+
+#### **3.2. `eIncrement` – Tăng giá trị**
+
+			ulNotifiedValue++;
+
+* Giống:
+
+	*   xTaskNotifyGive()
+	
+*   Khác biệt:
+	
+	*   Có thể dùng chung với `xTaskNotify()` API.
+	
+#### **3.3. `eSetValueWithOverwrite` – Ghi đè**
+
+			ulNotifiedValue = ulValue;
+
+* Không kiểm tra giá trị cũ.
+	
+*   Ví dụ:
+	
+	*   Trạng thái hệ thống
+	
+	*   Giá trị nhiệt độ tức thời
+	
+	*   Tốc độ motor hiện tại
+
+					    xTaskNotify(displayTaskHandle,
+		            currentTemperature,
+		            eSetValueWithOverwrite);
+
+#### **3.4. ``eSetValueWithoutOverwrite` – Không ghi đè**
+
+* Chỉ ghi nếu `ucNotifyState` chưa ở trạng thái “đã nhận”.
+	
+*   Nếu Task chưa đọc giá trị cũ:
+	
+	*   Hàm trả về `pdFAIL`.
+	
+* Ứng dụng:
+
+	*  Mailbox yêu cầu không mất dữ liệu.
+	
+	*  Cơ chế giao tiếp cần xác nhận đọc.  
+
+			if (xTaskNotify(taskHandle,
+			                newValue,
+			                eSetValueWithoutOverwrite) == pdFAIL)
+			{
+			    // xử lý khi mailbox đang bận
+			}
+	
+  
+   </details> 
