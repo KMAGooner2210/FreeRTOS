@@ -2995,4 +2995,263 @@
 		}
 
    </details> 
+
+   
+<details>
+    <summary><strong>BÀI 2: MUTEX (MUTUAL EXCLUSION)</strong></summary>
+
+## **BÀI 2: MUTEX (MUTUAL EXCLUSION)**
+
+### **I.  MUTEX**
+
+#### **1.1. Khái niệm**
+
+*	**Mutex** là cơ chế đồng bộ dùng để bảo vệ tài nguyên chia sẻ giữa các task
+
+*  Tại một thời điểm chỉ có một task duy nhất được truy cập tài nguyên
+
+*  Các task khác phải chờ cho đến khi mutex được giải phóng
+
+#### **1.2. Cơ chế sở hữu (Ownership)**
+
+* Mutex có khái niệm chủ sở hữu (owner)
+
+	*	Task gọi `xSemaphoreTake()` thành công sẽ trở thành owner
+	
+	*  Chỉ owner mới được phép gọi `xSemaphoreGive()`
+	
+#### **1.3. Cú pháp**
+
+		xSemaphoreTake(xMutex, portMAX_DELAY);   // Khóa (chờ nếu cần)
+		 /* ----- Critical section: truy cập tài nguyên ----- */
+		xSemaphoreGive(xMutex);                   // Mở khóa (phải bởi owner)
+
+
+						
+### **II.  PHÂN LOẠI**
+
+#### **2.1. Standard Mutex**
+
+##### **2.1.1. Khởi tạo Mutex**
+
+*	Để tạo một Standard Mutex, sử dụng hàm:
+
+		SemaphoreHandle_t xSemaphoreCreateMutex( void );
+
+##### **2.1.2.Đặc điểm**
+		
+*   Một task chỉ được **take (lấy)** mutex một lần
+
+	*  Mutex có tính **sở hữu (ownership)**.
+	
+	*  Task đã lấy mutex được gọi là **task sở hữu (owner task)**.
+	
+	*  Chỉ task sở hữu mới được phép **give (trả lại)** mutex. 
+
+*   Không cho phép **nested locking** (khóa lồng nhau)
+
+*  Không được dùng trong ISR
+
+##### **2.1.3.Thao tác**
+
+* **Lấy Mutex (Take):**
+
+		BaseType_t xSemaphoreTake( SemaphoreHandle_t xMutex, TickType_t xTicksToWait );
+		
+	* **Tham số:**
+
+		*   `pdTRUE`: Lấy mutex thành công.
+
+		*   `pdFALSE`: Không lấy được mutex (hết thời gian chờ).
+	 
+	* **Giá trị trả về:**
+
+		*   `pdTRUE`: Lấy mutex thành công
+
+		*   `pdFALSE`: Không lấy được mutex (hết thời gian chờ).
+
+* **Trả lại Mutex (Give):**
+
+		BaseType_t xSemaphoreGive( SemaphoreHandle_t xMutex );
+		
+	 
+	* **Giá trị trả về:**
+
+		*   `pdTRUE`: Trả mutex thành công.
+
+		*   `pdFALSE`: Trả mutex thất bại (thường do task gọi không phải là task sở hữu).
+
+##### **2.1.4.VD**
+
+		// Khai báo handle mutex
+		SemaphoreHandle_t xI2cMutex;
+
+		// Hàm khởi tạo ứng dụng
+		void app_init(void) {
+		    // Tạo mutex cho bus I2C
+		    xI2cMutex = xSemaphoreCreateMutex();
+		    
+		    if (xI2cMutex == NULL) {
+		        // Xử lý lỗi nếu không tạo được mutex
+		        // (thường do thiếu heap memory)
+		    }
+		    
+		    // Khởi tạo các task sử dụng I2C
+		    xTaskCreate(vSensorTask, "Sensor", 256, NULL, 1, NULL);
+		    xTaskCreate(vDisplayTask, "Display", 256, NULL, 1, NULL);
+		}
+
+		// Task đọc cảm biến qua I2C
+		void vSensorTask(void *pvParameters) {
+		    uint8_t sensorData[16];
+		    
+		    for(;;) {
+		        // Cố gắng lấy mutex I2C, chờ tối đa 100ms
+		        if (xSemaphoreTake(xI2cMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+		            
+		            // ===== Đã có quyền sử dụng I2C =====
+		            // Thực hiện giao tiếp I2C với cảm biến
+		            i2c_start(0x50);              // Gửi điều kiện START và địa chỉ slave
+		            i2c_write(0x00);               // Ghi địa chỉ thanh ghi
+		            i2c_rep_start(0x51);           // Gửi lại START để đọc
+		            for(int i = 0; i < 16; i++) {
+		                sensorData[i] = i2c_read(i == 15 ? I2C_NACK : I2C_ACK);
+		            }
+		            i2c_stop();                     // Kết thúc truyền thông
+		            
+		            // Trả lại mutex cho task khác sử dụng
+		            xSemaphoreGive(xI2cMutex);
+		            
+		            // Xử lý dữ liệu cảm biến
+		            processSensorData(sensorData, 16);
+		            
+		        } else {
+		            // Không lấy được mutex trong 100ms
+		            // Có thể ghi log hoặc xử lý lỗi
+		            vLogError("I2C busy - sensor read timeout");
+		        }
+		        
+		        // Đợi một khoảng thời gian trước khi đọc lại
+		        vTaskDelay(pdMS_TO_TICKS(1000));
+		    }
+		}
+
+		// Task hiển thị thông tin lên LCD (cũng dùng I2C)
+		void vDisplayTask(void *pvParameters) {
+		    char displayBuffer[32];
+		    
+		    for(;;) {
+		        // Lấy mutex I2C để cập nhật LCD
+		        if (xSemaphoreTake(xI2cMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+		            
+		            // Cập nhật thông tin lên LCD qua I2C
+		            lcd_clear();
+		            lcd_set_cursor(0, 0);
+		            lcd_print(displayBuffer);
+		            
+		            // Trả lại mutex
+		            xSemaphoreGive(xI2cMutex);
+		        }
+		        
+		        vTaskDelay(pdMS_TO_TICKS(100));
+		    }
+		}		
+
+#### **2.2. Recursive Mutex**
+
+##### **2.2.1.Khái niệm**
+
+* **Recursive Mutex** (mutex đệ quy) là một dạng đặc biệt của mutex cho phép **cùng một task** có thể **take (lấy)** mutex nhiều lần liên tiếp mà không bị block.
+
+##### **2.2.2. Khởi tạo Recursive Mutex**
+
+*	Để tạo một Recursive Mutex, sử dụng hàm:
+
+		SemaphoreHandle_t xSemaphoreCreateRecursiveMutex( void );
+
+##### **2.2.3.Đặc điểm**
+		
+*   Cùng một task có thể take mutex nhiều lần
+
+*  FreeRTOS theo dõi số lần take theo từng **owner (task sở hữu)**
+	
+	*  Hệ thống duy trì một **biến đếm (counter)** cho mỗi recursive mutex.
+	
+	*  Mỗi lần task sở hữu take thành công, biến đếm tăng lên 1.
+
+*  Chỉ khi số lần give bằng số lần take, mutex mới thực sự được **unlock (mở khóa)**
+
+*  Không được dùng trong ISR
+
+##### **2.2.4.Thao tác**
+
+* **Lấy Recursive Mutex (Take Recursive):**
+
+		BaseType_t xSemaphoreTakeRecursive( SemaphoreHandle_t xMutex, TickType_t xTicksToWait );
+		
+	* **Tham số:**
+
+		*   `xMutex`: Handle của recursive mutex cần lấy.
+
+		*   `xTicksToWait`: Thời gian chờ tối đa (tính bằng ticks).
+	 
+	* **Giá trị trả về:**
+
+		*   `pdTRUE`: Lấy mutex thành công
+
+		*   `pdFALSE`: Không lấy được mutex (hết thời gian chờ).
+
+	* **Cơ chế hoạt động:**
+
+		*  Nếu task gọi **chưa sở hữu mutex**: hoạt động như standard mutex (phải chờ nếu mutex đang bị chiếm).
+
+		*  Nếu task gọi **đã sở hữu mutex**: thành công ngay lập tức, tăng **lock count** lên 1.
+		
+* **Trả lại Recursive Mutex (Give Recursive):**
+
+		BaseType_t xSemaphoreGiveRecursive( SemaphoreHandle_t xMutex );
+		
+	 
+	* **Giá trị trả về:**
+
+		*   `pdTRUE`: Trả mutex thành công.
+
+		*   `pdFALSE`: Trả mutex thất bại (thường do task gọi không phải là task sở hữu).
+
+	* **Cơ chế hoạt động:**
+
+		*  Giảm **lock count** xuống 1.
+
+		* Khi lock count về **0**, mutex thực sự được giải phóng và task khác có thể lấy được.
+		
+##### **2.2.5.VD**
+
+		// Tạo recursive mutex
+		SemaphoreHandle_t xRecursiveMutex = xSemaphoreCreateRecursiveMutex();
+
+		// Task sử dụng recursive mutex
+		void vTaskFunction(void *pvParameters) {
+		    // Lần take thứ nhất
+		    xSemaphoreTakeRecursive(xRecursiveMutex, portMAX_DELAY);
+		    
+		    // Đang ở trong vùng bảo vệ cấp 1
+		    
+		    // Lần take thứ hai (lồng nhau)
+		    xSemaphoreTakeRecursive(xRecursiveMutex, portMAX_DELAY);
+		    
+		    // Đang ở trong vùng bảo vệ cấp 2
+		    // Thực hiện công việc...
+		    
+		    // Trả lại lần thứ hai
+		    xSemaphoreGiveRecursive(xRecursiveMutex);
+		    
+		    // Vẫn còn ở vùng bảo vệ cấp 1
+		    
+		    // Trả lại lần thứ nhất
+		    xSemaphoreGiveRecursive(xRecursiveMutex);
+		    
+		    // Đã thoát hoàn toàn khỏi vùng bảo vệ
+		}
+
+   </details> 
    
