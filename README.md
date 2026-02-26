@@ -2708,3 +2708,291 @@
 	
   
    </details> 
+
+# CHƯƠNG 6: **SYNC & RESOURCE PROTECTION**
+<details>
+    <summary><strong>BÀI 1: CRITICAL SECTIONS</strong></summary>
+
+## **BÀI 1: CRITICAL SECTIONS**
+
+### **I.  RACE CONDITION**
+
+#### **1.1. Khái niệm**
+
+*	**Race Condition** (tình trạng tranh chấp tài nguyên) là một hiện tượng phổ biến trong các hệ thống xử lý song song.
+
+*  Nó phát sinh khi nhiều **tiến trình (process)** hoặc **luồng (thread)** cùng truy cập vào một **tài nguyên dùng chung (shared resource)**.
+
+*  Các truy cập này không được kiểm soát bởi **cơ chế đồng bộ**
+
+	*  **Shared resource** có thể là biến, vùng nhớ, tệp tin hoặc thiết bị phần cứng
+
+	*  **Process** là đơn vị thực thi chương trình có không gian địa chỉ riêng 
+
+	*  **Thread** là đơn  vi thực thi nhỏ hơn trong một tiến trình, dùng chung không gian địa chỉ với các luồng khác
+	
+*  Khi Race Condition xảy ra, kết quả của chương trình phụ thuộc vào thứ tự thực thi của các luồng
+
+	* Thứ tự này là **không xác định** và do **scheduler** của hệ điều hành quyết định
+
+#### **1.2. Cơ chế hình thành**
+
+* **Race condition** xuất hiện khi thỏa mãn:
+
+	*	Có tài nguyên dùng chung giữa các thực thể thực thi
+	
+		*	VD: **Biến đếm truy cập website**
+		
+			*  Một trang web có biến counter dùng để đếm số lượng truy cập 
+			
+			*  Biến này được lưu trong bộ nhớ và nhiều phiên xử lý request khác nhau sẽ cùng đọc và ghi vào biến này  	
+	
+	*	Có nhiều thực thể thực thi đồng thời
+	
+		*	VD: **Ứng dụng đa luồng xử lý ảnh****
+		
+			*  Một ứng dụng chỉnh sửa ảnh tạo ra 4 luồng riêng biệt để xử lý 4 góc của một bức ảnh lớn.
+			
+			*  Các luồng này cùng chạy song song để tăng tốc xử lý. 	
+
+	*	Không tồn tại cơ chế loại trừ tương hỗ
+	
+		*	VD: **Tăng biến đếm**
+		
+			*  Xét một thao tác tăng biến đếm toàn cục: `global_counter++`
+			
+			*  Thao tác này được chia làm 3 bước riêng biệt:
+			
+				*  Read: Giá trị hiện tại của `global_counter` được đọc từ bộ nhớ vào thanh ghi
+				
+				*  Modify: Giá trị trong thanh ghi được tăng lên 1 đơn vị
+				
+				*  Write: Giá trị mới được ghi từ thanh ghi trở lại bộ nhớ
+				
+### **II.  ATOMICITY**
+
+#### **2.1. Định nghĩa**
+
+*	Tính nguyên tử là tính chất của một thao tác được bảo đảm thực hiện trọn vẹn hoặc không thực hiện gì cả
+
+*   Thao tác đó không bị gián đoạn hay xen kẽ bởi tiến trình khác
+
+#### **2.2.Đặc điểm**
+
+* Không bị gián đoạn trong quá trình thực thi
+
+* Không xảy ra xen kẽ với thao tác tương tự từ luồng khác
+
+* Thao tác hoàn tất toàn bộ, hoặc trạng thái hệ thống không thay đổi, không tồn tại trạng thái trung gian quan sát được
+
+#### **2.3.Ví dụ**
+
+* Đọc/ghi 1 byte đơn lẻ
+	
+	*  CPU thực hiện lệnh `MOV` (trên kiến trúc x86) hoặc `LDR`/`STR` (trên ARM) để đọc hoặc ghi một đơn vị dữ liệu từ bộ nhớ.
+	
+	*   Bus dữ liệu giữa CPU và bộ nhớ đảm bảo rằng một lần truyền dữ liệu cơ bản không thể bị xen ngang bởi CPU khác.
+
+* Test-and-Set (TAS)
+	
+	*  Đọc giá trị hiện tại của một ô nhớ
+	
+	*   Sau đó đặt ô nhớ đó thành 1 (hoặc giá trị khác không)	
+
+* Compare-and-Swap (CAS)
+	
+	*  So sánh giá trị hiện tại của ô nhớ với một giá trị kỳ vọng.
+	
+	*   Nếu bằng nhau, thay thế nó bằng giá trị mới
+
+			int CompareAndSwap(int *ptr, int expected, int new_value) {
+			    int current = *ptr;               // Đọc giá trị hiện tại
+			    if (current == expected) {         // So sánh với giá trị kỳ vọng
+			        *ptr = new_value;              // Nếu bằng, cập nhật giá trị mới
+			    }
+			    return current;                    // Trả về giá trị cũ
+			}
+
+* Fetch-and-Add
+	
+	*   Đọc giá trị hiện tại của ô nhớ
+	
+	*   Sau đó cộng thêm một giá trị xác định vào ô nhớ đó
+
+			int FetchAndAdd(int *ptr, int increment) {
+			    int old_value = *ptr;      // Đọc giá trị hiện tại
+			    *ptr = old_value + increment; // Cộng thêm giá trị
+			    return old_value;          // Trả về giá trị cũ
+			}    
+  
+### **III.  KHÓA NGẮT (taskENTER_CRITICAL)**
+
+#### **3.1. Cơ chế**
+
+* `taskENTER_CRITICAL()` thực hiện:
+
+	* Gọi `portDISABLE_INTERRUPTS()` 
+	
+	* Tăng biến nesting count để hỗ trợ critical section lồng nhau 
+
+* `taskEXIT_CRITICAL()` thực hiện:
+	
+	* Giảm biến nesting count
+	
+	* Chỉ khi nesting count về 0 mới khôi phực ngắt bằng `portENABLE_INTERRUPTS()` hoặc khôi phục mask trước đó
+
+* Trong khoảng giữa `ENTER` và `EXIT`:
+
+	* Không có ISR nào được thực thi.
+	
+	* Không xảy ra context switch.
+	
+* **Cú pháp:**
+
+		taskENTER_CRITICAL();
+		/* ----- Critical section ----- */
+		taskEXIT_CRITICAL();
+
+#### **3.2. Đặc điểm**
+
+* Thực thi rất nhanh (chỉ vài chu kỳ CPU).
+
+*  Không cần đối tượng đồng bộ như mutex hoặc semaphore.
+
+*  Làm tăng độ trễ ngắt (Interrupt Latency).
+
+#### **3.3. taskENTER_CRITICAL_FROM_ISR()**
+
+* Trong ISR không được dùng `taskENTER_CRITICAL()`.
+
+	*   ISR không thuộc ngữ cảnh task.
+	
+* **Cú pháp:**
+ 
+		 UBaseType_t uxSavedInterruptStatus;
+
+		uxSavedInterruptStatus = taskENTER_CRITICAL_FROM_ISR();
+		/* ----- Critical section trong ISR ----- */
+		taskEXIT_CRITICAL_FROM_ISR(uxSavedInterruptStatus);
+	
+#### **3.4. Lưu ý**
+
+* Chỉ sử dụng khi:
+
+	*   Cập nhật biến đếm.
+	
+	*   Gán cờ trạng thái.
+	
+	*    Đọc/ghi thanh ghi phần cứng.
+	
+	*     Sao chép vài byte dữ liệu.
+
+#### **3.5. VD**
+
+* Trong Task:
+
+		void vSharedCounterTask(void *pvParameters){
+		for(;;){
+			taskENTER_CRITICAL();
+			global_counter++;
+			local_copy = global_counter;
+			taskEXIT_CRITICAL();
+			}
+		}
+
+* Trong ISR
+
+		void TIM2_IRQHandler(void){
+			
+			UBaseType_t uxStatus = taskENTER_CRITICAL_FROM_ISR()
+			shared_flag = 1;
+			taskEXIT_CRITICAL_FROM_ISR(uxStatus);
+			}
+
+### **IV.  KHÓA SCHEDULER – vTaskSuspendAll()**
+
+#### **4.1. Cơ chế**
+
+##### **4.1.1. Hàm vTaskSuspendAll()**
+
+* Khi một task gọi `vTaskSuspendAll()`:
+
+	* Hệ thống tăng biến nesting count lên 1 đơn vị
+	
+		*  Biến đếm này cho biết số lần scheduler bị đình chỉ lồng nhau  
+	
+	* Scheduler bị tạm dừng (scheduler suspended)
+	
+	* Không có context switch nào được phép xảy ra
+	
+		* Task hiện tại sẽ tiếp tục chiếm CPU cho đến khi gọi `xTaskResumeAll()`
+		
+		* Không một task nào khác, kể cả task có higher priority được phép chạy
+		
+	* Interrupt vẫn được enable, do đó các ISR vẫn có thể xử lý ngắt và thực hiện công việc của chúng    
+
+##### **4.1.2. Hàm vTaskResumeAll()**
+
+* Khi một task gọi `vTaskResumeAll()`:
+
+* Khi biến đếm trở về 0, scheduler được khôi phục hoạt động 
+
+* Hệ thống sẽ kiểm tra và xử lý các **chuyển đổi ngữ cảnh đang chờ (pending context switch)** có thể đã phát sinh trong thời gian scheduler bị đình chỉ 
+	
+*  Hàm trả về: 
+	
+	*  **pdTRUE**: Nếu có một chuyển đổi ngữ cảnh xảy ra ngay sau khi resume.
+	
+	*   **pdFALSE**: Nếu không có chuyển đổi ngữ cảnh nào xảy ra.
+
+#### **4.2. Cú pháp**
+
+		vTaskSuspendAll();
+		/* ----- Critical section ----- */
+		xTaskResumeAll();
+
+#### **4.3. Ứng dụng**
+
+* **Cần ISR vẫn hoạt động** để thu thập dữ liệu thời gian thực:
+
+	-   Driver UART nhận dữ liệu vào buffer (ISR điền byte).
+	
+	-   Task xử lý buffer lớn mà không muốn bị gián đoạn bởi task khác.
+	
+	-   Driver SPI/I2C với polling dài, nhưng vẫn cần nhận ngắt từ các nguồn khác.
+	
+	-   Xử lý dữ liệu sensor batch mà ISR tiếp tục cập nhật raw data.
+
+#### **4.4. VD**
+
+		// Task xử lý buffer UART nhận được từ ISR
+		void vUartProcessTask(void *pvParameters) {
+		    for(;;) {
+		        // Chờ có dữ liệu (hoặc polling)
+		        if (uxBytesInUartBuffer > MIN_PROCESS) {
+
+		            vTaskSuspendAll();  // Ngăn task khác đọc/ghi buffer
+
+		            // ----- Critical section -----
+		            memcpy(localBuf, uartRxBuffer, PROCESS_SIZE);
+		            uartRxHead -= PROCESS_SIZE;  // Di chuyển con trỏ
+		            // Xử lý localBuf (parse, validate, gửi lên app layer...)
+		            // ----- End critical section -----
+
+		            xTaskResumeAll();   // Cho phép scheduler chạy lại
+		        }
+
+		        vTaskDelay(pdMS_TO_TICKS(10));
+		    }
+		}
+
+		// ISR UART vẫn chạy bình thường, điền byte vào uartRxBuffer
+		void USART_IRQHandler(void) {
+		    if (USART_GetITStatus(USARTx, USART_IT_RXNE)) {
+		        uartRxBuffer[uartRxHead++] = USART_ReceiveData(USARTx);
+		        // Không bị block bởi task suspend scheduler
+		    }
+		}
+
+   </details> 
+   
