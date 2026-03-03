@@ -3254,4 +3254,440 @@
 		}
 
    </details> 
+
    
+<details>
+    <summary><strong>BÀI 3: SEMAPHORE</strong></summary>
+
+## **BÀI 3: SEMAPHORE**
+
+### **I.  GIỚI THIỆU**
+
+#### **1.1. Định nghĩa**
+
+*	**Semaphore** là một biến số nguyên hoặc một kiểu dữ liệu trừu tưởng được sử dụng để:
+
+	*  Điều khiển quyền truy cập vào tài nguyên chung
+
+	*  Đồng bộ hóa giữa các tiến trình hoặc luồng
+
+#### **1.2. Nguyên lý hoạt động**
+
+* Semaphore gồm 2 phần chính:
+
+	* **Biến đếm nguyên (integer value):** Gọi là s hoặc count 
+
+		* Giá trị ≥ 0: còn tài nguyên sẵn có
+		
+		* Giá trị = 0: hết tài nguyên, ai wait sẽ bị block
+		
+		* Giá trị < 0: có  -(s) tiến trình/luồng đang chờ (queued)
+
+	* **Hai thao tác atomic:** 
+
+		* **Giảm đếm: wait():**
+				
+				wait(S):
+					S.count = S.count - 1
+					
+			* Nếu S.count < 0 thì:
+			
+				* Thêm tiến trình hiện tại vào hàng đợi của S 
+		
+				* Block tiến trình hiện tại (chuyển sang trạng thái waiting) 
+		
+		* **Tăng đếm: signal():**
+				
+				signal(S):
+					S.count = S.count + 1
+					
+			* Nếu S.count ≤ 0 thì:
+			
+				* Lấy một tiến trình từ hàng đợi của S (thường là tiến trình chờ lâu nhất)
+		
+				* Đánh thức tiến trình đó (chuyển sang ready)
+	
+		* **VD:**
+				
+| Giá trị ban đầu | Số lần gọi wait() | Giá trị sau wait() | Hành vi                          | Số lần gọi signal() | Giá trị sau signal()                  |
+|-----------------|-------------------|--------------------|----------------------------------|----------------------|----------------------------------------|
+| 5               | 1 lần             | 4                  | Thành công, không block          | —                    | —                                      |
+| 1               | 1 lần             | 0                  | Thành công, không block          | 1 lần                | 1                                      |
+| 0               | 1 lần             | -1                 | Tiến trình bị block              | 1 lần                | 0 (đánh thức 1 tiến trình)            |
+| 0               | 3 lần             | -3                 | 3 tiến trình bị block            | 2 lần                | -1 (đánh thức 2, còn 1 tiến trình chờ)|
+	
+		
+### **II.  PHÂN LOẠI**
+
+#### **2.1. Binary Semaphore**
+
+##### **2.1.1. Khái niệm**
+
+*	Binary Semaphore là semaphore chỉ có 2 giá trị trạng thái: **0** hoặc **1**
+
+*	Nó được dùng để thực hiện mutual exclusion (loại trừ lẫn nhau)
+
+	* Đảm bảo chỉ một tiến trình/luồng được truy cập vào critical section tại một thời điểm
+
+
+##### **2.1.2.Đặc điểm**
+		
+*   Giá trị chỉ có:
+
+	* **0:** locked / occupied / unavailable
+	
+	* **1:** unlocked / tree / available
+  
+
+*  Khởi tạo thường bằng 1
+	
+*  Khi wait() (P ) :
+
+	* Nếu đang là 1 thì giảm xuống 0 và tiếp tục 
+	
+	* Nếu là 0 thì block  
+	
+*  Khi signal() (V):
+
+	* Tăng lên 1 và đánh thức một tiến trình đang chờ (nếu có)
+	
+	* Nếu là 0 thì block  
+
+*   Không cho phép giá trị âm hoặc > 1 
+
+##### **2.1.3.Cấu trúc**
+
+* **Khai báo semaphore:**
+
+			sem_t semaphore_name;   // Unnamed semaphore (trong bộ nhớ)
+			sem_t *semaphore_name;	// Named semaphore (con trỏ)
+
+* **Các thao tác cơ bản:**
+		
+	* **Hàm khởi tạo:**
+	
+		* **`sem_init()` - Khởi tạo Unnamed Semaphore**
+
+				int sem_init(sem_t *sem, int pshared, unsigned int value);
+
+			*   sem:
+			 
+				* Con trỏ đến semaphore được khai báo
+				
+				* Trỏ đến vùng nhớ nơi semaphore sẽ được khởi tạo
+				
+				* VD: 
+
+						sem_t my_sem;           // Khai báo biến
+						sem_init(&my_sem, ...); // &my_sem là địa chỉ
+
+						// Hoặc cấp phát động
+						sem_t *sem_ptr = malloc(sizeof(sem_t));
+						sem_init(sem_ptr, ...);	 
+		
+			*   pshared:
+			 
+				* **0** - Semaphore dùng cho các **thread** trong cùng tiến trình:
+
+						// Các thread trong cùng process có thể dùng chung
+						sem_init(&bin_sem, 0, 1);  // Dùng cho thread
+
+						// Ví dụ:
+						pthread_t thread1, thread2;
+						// Cả 2 thread đều có thể truy cập bin_sem này		
+			
+				* **Non-zero** - Semaphore dùng cho các **process** khác nhau
+
+						// Cần đặt semaphore trong shared memory
+						sem_t *shared_sem = mmap(NULL, sizeof(sem_t), 
+						                         PROT_READ | PROT_WRITE,
+						                         MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+						sem_init(shared_sem, 1, 1);  // Dùng cho process
+						// Process A và B đều có thể truy cập
+
+
+			*   value: 
+			
+				* Giá trị khởi tạo của semaphore (unsigned int)
+				
+				* VD: 
+
+						sem_init(&mutex, 0, 1);     // Binary: 1 (critical section trống)
+						sem_init(&resource, 0, 5);  // Counting: 5 tài nguyên
+						sem_init(&sync, 0, 0);      // Đồng bộ: bắt đầu với 0
+			 
+
+	
+		* **`sem_open()` - Mở/Tạo Named Semaphore**
+
+				sem_t *sem_open(const char *name, int oflag, ...);
+				// Hoặc với 4 tham số:
+				sem_t *sem_open(const char *name, int oflag, mode_t mode, unsigned int value);
+
+			*   name:
+			 
+				*    Tên định danh của semaphore trong hệ thống
+				
+				*    Phải bắt đầu bằng dấu 
+				
+				*    VD: 
+
+					sem_open("/mysem", ...);        // Tên /mysem
+					sem_open("/database_pool", ...); // Tên có ý nghĩa
+					sem_open("/printer_sem", ...);   // Dễ nhận biết
+		
+			*   oflag:
+			 
+				* **1. O_CREAT:** Tạo mới nếu chưa tồn tại
+
+						sem_open("/test", O_CREAT, 0644, 1);
+
+	
+				* **2. O_EXCL:** Kết hợp với O_CREAT, báo lỗi nếu đã tồn tại
+
+						sem_open("/test", O_CREAT | O_EXCL, 0644, 1);
+
+			*   mode (chỉ dùng khi có O_CREAT): 
+			
+				*    **Quyền truy cập** cho owner/group/others (giống file)
+				
+				*    Số octal (bát phân)
+
+							// Các mode phổ biến:
+							0644  // rw-r--r--  (owner: đọc/viết, group: đọc, others: đọc)
+							0666  // rw-rw-rw-  (tất cả đều đọc/viết)
+							0600  // rw-------  (chỉ owner mới đọc/viết)
+							0640  // rw-r-----  (owner: đọc/viết, group: đọc, others: không)
+
+			*  value (chỉ dùng khi có O_CREAT): 
+			
+				*    **Giá trị khởi tạo** nếu tạo mới
+				
+							sem_open("/mutex", O_CREAT, 0644, 1);   // Binary semaphore
+							sem_open("/pool", O_CREAT, 0644, 10);   // Counting: 10 permits
+							sem_open("/sync", O_CREAT, 0644, 0);    // Đồng bộ: bắt đầu với 0
+
+
+	* **Hàm wait:**
+	
+		* **`sem_wait()`** -  Blocking Wait
+
+				int sem_wait(sem_t *sem);
+
+			*    **sem**: Con trỏ đến semaphore (có thể là &sem hoặc con trỏ từ sem_open)
+			
+			*  **Cách hoạt động:**
+
+					// Giả lập cách hoạt động
+					int sem_wait(sem_t *sem) {
+					    // Kiểm tra nếu semaphore còn giá trị
+					    if (sem->value > 0) {
+					        sem->value--;        // Giảm giá trị
+					        return 0;             // Thành công, tiếp tục
+					    } else {
+					        // Giá trị = 0, phải chờ
+					        add_current_thread_to_waiting_queue(sem->queue);
+					        block_current_thread();  // Thread ngủ
+					        // Khi được đánh thức bởi sem_post, chạy tiếp
+					        return 0;
+					    }
+					} 	 
+
+			*  **VD:**
+
+					sem_t mutex;
+					sem_init(&mutex, 0, 1);
+
+					// Thread 1
+					sem_wait(&mutex);  // value-- (1->0), được vào
+					// Critical section
+
+					// Thread 2
+					sem_wait(&mutex);  // value=0, thread 2 bị block ở đây
+					// Chỉ chạy tiếp khi thread 1 gọi sem_post
+
+
+		* **`sem_trywait()`** -  Non Blocking Wait
+
+				int sem_trywait(sem_t *sem);
+
+			*    **sem**: Con trỏ đến semaphore (có thể là &sem hoặc con trỏ từ sem_open)
+			
+			*  **Cách hoạt động:**
+
+					int sem_trywait(sem_t *sem) {
+					    if (sem->value > 0) {
+					        sem->value--;
+					        return 0;  // Lấy được tài nguyên
+					    } else {
+					        // KHÔNG block, trả về lỗi ngay
+					        errno = EAGAIN;
+					        return -1;  // Tài nguyên không available
+					    }
+					}
+
+			*  **VD:**
+
+					sem_t resource;
+					sem_init(&resource, 0, 2);
+
+					int result = sem_trywait(&resource);
+					if (result == 0) {
+					    // Lấy được tài nguyên
+					    printf("Đã lấy được tài nguyên\n");
+					} else {
+					    if (errno == EAGAIN) {
+					        // Không lấy được, nhưng không block
+					        printf("Tài nguyên đang bận, làm việc khác\n");
+					        do_something_else();
+					    }
+					}
+
+		* **`sem_timedwait()`** -  Wait với Timeout
+
+				int sem_timedwait(sem_t *sem, const struct timespec *abs_timeout);
+
+			*    **sem**: Con trỏ đến semaphore (có thể là &sem hoặc con trỏ từ sem_open)
+
+			*    **abs_timeout**: 
+			
+					* Thời điểm timeout tuyệt đối (không phải khoảng thời gian)
+				
+				* Cấu trúc timespec: 
+
+						struct timespec {
+						    time_t tv_sec;   // Giây (kể từ 1970-01-01 00:00:00)
+						    long   tv_nsec;  // Nanosecond (0-999,999,999)
+						};		
+
+			*  **Cách hoạt động:**
+
+					#include <time.h>
+
+					sem_t sem;
+					sem_init(&sem, 0, 0);  // Bắt đầu với 0
+
+					// Tạo timeout: thời điểm hiện tại + 5 giây
+					struct timespec ts;
+					clock_gettime(CLOCK_REALTIME, &ts);  // Lấy thời gian hiện tại
+					ts.tv_sec += 5;  // Cộng thêm 5 giây
+
+					// Chờ tối đa 5 giây
+					int ret = sem_timedwait(&sem, &ts);
+
+					if (ret == 0) {
+					    printf("Đã lấy được semaphore\n");
+					} else if (errno == ETIMEDOUT) {
+					    printf("Hết 5 giây mà không lấy được\n");
+					}
+
+
+	* **Hàm lấy giá trị:**
+	
+		* **`sem_getvalue()`**
+
+				int sem_getvalue(sem_t *sem, int *sval);
+
+			*   sem:
+				
+				* Con trỏ đến semaphore
+				 
+			* 	sval:
+			
+				* Con trỏ đến biến nhận giá trị hiện tại
+			*  VD:
+
+					sem_t sem;
+					sem_init(&sem, 0, 5);  // 5 permits
+
+					int current_value;
+					sem_getvalue(&sem, &current_value);
+					printf("Số permits hiện có: %d\n", current_value);  // In: 5
+
+					sem_wait(&sem);  // Giảm xuống 4
+					sem_getvalue(&sem, &current_value);
+					printf("Số permits hiện có: %d\n", current_value);  // In: 4 				    
+
+	* **Hàm hủy/đóng:**
+	
+		* **`sem_destroy()`** - Hủy Unnamed Semaphore
+
+				int sem_destroy(sem_t *sem);
+
+			*   sem:
+				
+				* Con trỏ đến semaphore
+				
+			* 	VD:
+
+					sem_t sem;
+					sem_init(&sem, 0, 1);
+					// ... sử dụng
+					sem_destroy(&sem);  // Giải phóng tài nguyên
+
+					// Sau khi destroy, không được dùng sem nữa
+					// sem_wait(&sem);  // Lỗi!		
+
+		* **`sem_close()`** - Đóng Named Semaphore
+
+				int sem_close(sem_t *sem);
+
+			*   sem:
+				
+				* Con trỏ đến semaphore
+				
+			* 	VD:
+
+					sem_t *sem = sem_open("/mysem", O_CREAT, 0644, 1);
+					// ... sử dụng
+					sem_close(sem);  // Đóng trong process hiện tại
+
+					// Semaphore vẫn tồn tại trong hệ thống
+					// Process khác vẫn có thể mở và dùng
+
+		* **`sem_unlink()`** - Xóa Named Semaphore khỏi hệ thống
+
+				int sem_unlink(const char *name);
+
+			*   name:
+				
+				* Tên semaphore (giống lúc tạo với sem_open)
+				
+			* 	VD:
+
+						// Process 1
+						sem_t *sem = sem_open("/mysem", O_CREAT, 0644, 1);
+						sem_close(sem);
+						sem_unlink("/mysem");  // Đánh dấu xóa khi không còn process nào dùng
+
+						// Process 2 (đang dùng /mysem)
+						// Khi process 2 gọi sem_close, /mysem sẽ bị xóa hoàn toàn
+			
+			* 	Cơ chế hoạt động:
+
+					// Giả lập
+					int sem_unlink(const char *name) {
+					    mark_for_deletion(name);  // Đánh dấu xóa
+					    
+					    if (number_of_processes_using(name) == 0) {
+					        delete_completely(name);  // Xóa ngay nếu không ai dùng
+					    }
+					    // Nếu còn process dùng, sẽ xóa khi process cuối cùng gọi sem_close
+					    return 0;
+					}
+
+	* **Hàm khởi tạo:**
+	
+			// Giá trị trả về đặc biệt
+			SEM_FAILED  // sem_open thất bại (thường là (sem_t*)-1)
+
+			// Các errno thường gặp
+			EINVAL  // Tham số không hợp lệ
+			EAGAIN  // sem_trywait không lấy được tài nguyên
+			ETIMEDOUT // sem_timedwait hết thời gian chờ
+			EINTR   // Bị ngắt bởi signal
+			EEXIST  // sem_open với O_CREAT|O_EXCL nhưng đã tồn tại
+			ENOENT  // sem_open không có O_CREAT mà semaphore không tồn tại
+			ENOSPC  // Hết bộ nhớ để tạo semaphore mới
+																    					    					    			
+   </details> 
