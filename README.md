@@ -3676,18 +3676,18 @@
 					    return 0;
 					}
 
-	* **Hàm khởi tạo:**
+	* **Các giá trị trả về:**
 	
-			// Giá trị trả về đặc biệt
+			
 			SEM_FAILED  // sem_open thất bại (thường là (sem_t*)-1)
 
 			// Các errno thường gặp
-			EINVAL  // Tham số không hợp lệ
-			EAGAIN  // sem_trywait không lấy được tài nguyên
-			ETIMEDOUT // sem_timedwait hết thời gian chờ
-			EINTR   // Bị ngắt bởi signal
-			EEXIST  // sem_open với O_CREAT|O_EXCL nhưng đã tồn tại
-			ENOENT  // sem_open không có O_CREAT mà semaphore không tồn tại
-			ENOSPC  // Hết bộ nhớ để tạo semaphore mới
+			EINVAL  		// Tham số không hợp lệ
+			EAGAIN  		// sem_trywait không lấy được tài nguyên
+			ETIMEDOUT 		// sem_timedwait hết thời gian chờ
+			EINTR   		// Bị ngắt bởi signal
+			EEXIST  		// sem_open với O_CREAT|O_EXCL nhưng đã tồn tại
+			ENOENT  		// sem_open không có O_CREAT mà semaphore không tồn tại
+			ENOSPC  		// Hết bộ nhớ để tạo semaphore mới
 																    					    					    			
    </details> 
