@@ -3256,6 +3256,7 @@
    </details> 
 
    
+
 <details>
     <summary><strong>BÀI 3: SEMAPHORE</strong></summary>
 
@@ -3676,18 +3677,428 @@
 					    return 0;
 					}
 
-	* **Các giá trị trả về:**
+	* **Hàm khởi tạo:**
 	
-			
+			// Giá trị trả về đặc biệt
 			SEM_FAILED  // sem_open thất bại (thường là (sem_t*)-1)
 
 			// Các errno thường gặp
-			EINVAL  		// Tham số không hợp lệ
-			EAGAIN  		// sem_trywait không lấy được tài nguyên
-			ETIMEDOUT 		// sem_timedwait hết thời gian chờ
-			EINTR   		// Bị ngắt bởi signal
-			EEXIST  		// sem_open với O_CREAT|O_EXCL nhưng đã tồn tại
-			ENOENT  		// sem_open không có O_CREAT mà semaphore không tồn tại
-			ENOSPC  		// Hết bộ nhớ để tạo semaphore mới
+			EINVAL  // Tham số không hợp lệ
+			EAGAIN  // sem_trywait không lấy được tài nguyên
+			ETIMEDOUT // sem_timedwait hết thời gian chờ
+			EINTR   // Bị ngắt bởi signal
+			EEXIST  // sem_open với O_CREAT|O_EXCL nhưng đã tồn tại
+			ENOENT  // sem_open không có O_CREAT mà semaphore không tồn tại
+			ENOSPC  // Hết bộ nhớ để tạo semaphore mới
+
+#### **2.2. Counting Semaphore**
+
+##### **2.2.1. Khái niệm**
+
+*	Counting Semaphore là semaphore có giá trị là số nguyên không âm dùng để quản lý nhiều phiên bản của một tài nguyên dùng để:
+
+	* Điều khiển quyền truy cập vào nhiều phiên bản giống hệt nhau của một tài nguyên chung
+	
+	* Đồng bộ hóa giữa các tiến trình hoặc luồng khi có nhiều đơn vị tài nguyên
+	
+	* Quản lý bộ đệm và các tài nguyên có số lượng giới hạn  	
+
+
+##### **2.2.2.Đặc điểm**
+		
+*   Giá trị chỉ có:
+
+	* **> 0:** 
+	
+		* Thông báo còn tài nguyên
+		
+		* Số lượng tài nguyên khả dụng bằng giá trị hiện tại  
+	
+	* **= 0:** 
+  
+		* Hết tài nguyên
+		
+		* Tất cả tài nguyên đang được sử dụng, không còn tài nguyên nào khả dụng 
+
+##### **2.2.3.Nguyên lý hoạt động**
+		
+*   **Khởi tạo:** 
+
+	* counting_sem = N (N là số nguyên)
+
+*   **Khi thực hiện wait() (P operation)**
+
+			if (counting_sem > 0) {
+				counting_sem--;		// Giảm giá trị đi 1
+				Tiếp tục thực thi;      // Đã lấy được tài nguyên
+			 } else { // counting_sem = 0
+				 Thread bị BLOCK;        // Xếp vào hàng đợi chờ
+				 Chờ đến khi được đánh thức bởi signal();
+			 }
+		
+*   **Khi thực hiện signal() (V operation)**
+
+			counting_sem++;			// Tăng giá trị lên 1
+			if (có  thread đang chờ trong hàng đợi) {
+				Đánh thức một thread;   // Thread này sẽ tiếp tục thực thi
+			}
+	
+*   **VD: Quản lý máy in**
+
+			sem_t printers;
+			sem_init(&printers, 0, 3);  // Bắt đầu với 3 máy in 
+	
+
+			TRẠNG THÁI BAN ĐẦU: printers = 3 (có 3 máy in)
+			
+			Thread A: gọi wait() -> printers: 3 -> 2, Thread A được dùng máy in	
+
+			Thread B: gọi wait()  → printers: 2 → 1, Thread B được dùng máy in	
+
+			Thread C: gọi wait()  → printers: 1 → 0, Thread C được dùng máy in	
+
+			Thread D: gọi wait()  → printers = 0 → Thread D bị BLOCK (xếp hàng đợi)
+
+			Thread E: gọi wait()  → printers = 0 → Thread E bị BLOCK (xếp hàng đợi)
+
+			Thread A: gọi signal() (trả máy in) -> printers: 0 -> 1, đánh thức Thread D
+			
+			Thread D: được đánh thức -> printers: 1 -> 0, thread D được dùng máy in
+		
+			Thread B: gọi signal() -> printers: 0 -> 1, đánh thức Thread E
+			
+			Thread E: được đánh thức -> printers: 1 -> 0, Thread E được dùng máy in
+							
+##### **2.2.4.Cấu trúc**
+
+* **Khai báo semaphore:**
+
+			// Unnamed counting semaphore (trong bộ nhớ)
+			sem_t counting_sem				// Biến semaphore
+			sem_t *counting_sem_ptr;		// Con trỏ đến semaphore
+
+			// Named counting semaphore
+			sem_t *named_sem;				// Con trỏ đến named semaphore
+
+* **Các thao tác cơ bản:**
+		
+	* **Hàm khởi tạo:**
+	
+		* **`sem_init()` -  Khởi tạo Unnamed Counting Semaphore**
+
+				int sem_init(sem_t *sem, int pshared, unsigned int value);
+
+			*   sem:
+			 
+				* Con trỏ đến semaphore được khai báo
+				
+				* Trỏ đến vùng nhớ nơi semaphore sẽ được khởi tạo
+				
+				* VD: 
+
+						sem_t my_sem;           // Khai báo biến
+						sem_init(&my_sem, ...); // &my_sem là địa chỉ
+
+						// Hoặc cấp phát động
+						sem_t *sem_ptr = malloc(sizeof(sem_t));
+						sem_init(sem_ptr, ...);	 
+		
+			*   pshared:
+			 
+				* **0** - Semaphore dùng cho các **thread** trong cùng tiến trình:
+
+						// Các thread trong cùng process có thể dùng chung
+						sem_init(&bin_sem, 0, 1);  // Dùng cho thread
+
+						// Ví dụ:
+						pthread_t thread1, thread2;
+						// Cả 2 thread đều có thể truy cập bin_sem này		
+			
+				* **Non-zero** - Semaphore dùng cho các **process** khác nhau
+
+						// Cần đặt semaphore trong shared memory
+						sem_t *shared_sem = mmap(NULL, sizeof(sem_t), 
+						                         PROT_READ | PROT_WRITE,
+						                         MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+						sem_init(shared_sem, 1, 1);  // Dùng cho process
+						// Process A và B đều có thể truy cập
+
+
+			*   value: 
+			
+				* Giá trị khởi tạo của semaphore (unsigned int)
+				
+				* VD: 
+
+						sem_init(&mutex, 0, 1);     // Binary: 1 (critical section trống)
+						sem_init(&resource, 0, 5);  // Counting: 5 tài nguyên
+						sem_init(&sync, 0, 0);      // Đồng bộ: bắt đầu với 0
+			 
+
+	
+		* **`sem_open()` - Mở/Tạo Named Counting Semaphore**
+
+				sem_t *sem_open(const char *name, int oflag, ...);
+				// Hoặc với 4 tham số:
+				sem_t *sem_open(const char *name, int oflag, mode_t mode, unsigned int value);
+
+			*   name:
+			 
+				*    Tên định danh của semaphore trong hệ thống
+				
+				*    Phải bắt đầu bằng dấu 
+				
+				*    VD: 
+
+					sem_open("/mysem", ...);        // Tên /mysem
+					sem_open("/database_pool", ...); // Tên có ý nghĩa
+					sem_open("/printer_sem", ...);   // Dễ nhận biết
+		
+			*   oflag:
+			 
+				* **1. O_CREAT:** Tạo mới nếu chưa tồn tại
+
+						sem_open("/test", O_CREAT, 0644, 1);
+
+	
+				* **2. O_EXCL:** Kết hợp với O_CREAT, báo lỗi nếu đã tồn tại
+
+						sem_open("/test", O_CREAT | O_EXCL, 0644, 1);
+
+			*   mode (chỉ dùng khi có O_CREAT): 
+			
+				*    **Quyền truy cập** cho owner/group/others (giống file)
+				
+				*    Số octal (bát phân)
+
+							// Các mode phổ biến:
+							0644  // rw-r--r--  (owner: đọc/viết, group: đọc, others: đọc)
+							0666  // rw-rw-rw-  (tất cả đều đọc/viết)
+							0600  // rw-------  (chỉ owner mới đọc/viết)
+							0640  // rw-r-----  (owner: đọc/viết, group: đọc, others: không)
+
+			*  value (chỉ dùng khi có O_CREAT): 
+			
+				*    **Giá trị khởi tạo** nếu tạo mới
+				
+							sem_open("/mutex", O_CREAT, 0644, 1);   // Binary semaphore
+							sem_open("/pool", O_CREAT, 0644, 10);   // Counting: 10 permits
+							sem_open("/sync", O_CREAT, 0644, 0);    // Đồng bộ: bắt đầu với 0
+
+
+	* **Hàm wait:**
+	
+		* **`sem_wait()`** -  Blocking Wait
+
+				int sem_wait(sem_t *sem);
+
+			*    **sem**: Con trỏ đến semaphore (có thể là &sem hoặc con trỏ từ sem_open)
+			
+
+			*  **VD:**
+
+					sem_t db_connections;
+					sem_init(&db_connections, 0, 3);
+
+					// Thread 1
+					sem_wait(&db_connections);  
+					
+						// value: 3 → 2, thread 1 được dùng kết nối
+						// Sử dụng database...
+
+
+					// Thread 2					
+					sem_wait(&db_connections);  
+										
+						// value: 2 → 1, thread 2 được dùng kết nối
+						// Sử dụng database...
+
+					// Thread 3				
+					sem_wait(&db_connections);  
+										
+						// value: 1 → 0, thread 3 được dùng kết nối
+						// Sử dụng database...
+						
+					// Thread 4				
+					sem_wait(&db_connections);  
+										
+						// value = 0 → thread 4 bị BLOCK
+						// Thread 4 sẽ ngủ cho đến khi có kết nối được trả lại
+						
+		* **`sem_trywait()`** -  Non Blocking Wait
+
+				int sem_trywait(sem_t *sem);
+
+			*    **sem**: Con trỏ đến semaphore (có thể là &sem hoặc con trỏ từ sem_open)
+			
+
+			*  **VD:**
+
+					sem_t connections;
+					sem_init(&connections, 0, 2);  // 2 kết nối
+
+					// Thử lấy kết nối
+					int result = sem_trywait(&connections);
+					if (result == 0) {
+					    // Lấy được kết nối
+					    printf("Đã lấy được kết nối, tiếp tục xử lý\n");
+					    process_database_query();
+					    sem_post(&connections);  // Trả kết nối
+					} else {
+					    if (errno == EAGAIN) {
+					        // Không lấy được kết nối, nhưng không block
+					        printf("Không có kết nối khả dụng, chuyển sang chế độ offline\n");
+					        process_locally();  // Xử lý local thay vì chờ
+					    }
+					}
+
+		* **`sem_timedwait()`** -  Wait với Timeout
+
+				int sem_timedwait(sem_t *sem, const struct timespec *abs_timeout);
+
+			*    **sem**: Con trỏ đến semaphore 
+
+			*    **abs_timeout**: 
+			
+					* Thời điểm timeout tuyệt đối (không phải khoảng thời gian)
+				
+				* Cấu trúc timespec: 
+
+						struct timespec {
+						    time_t tv_sec;   // Giây (kể từ 1970-01-01 00:00:00)
+						    long   tv_nsec;  // Nanosecond (0-999,999,999)
+						};		
+
+			*  **Cách hoạt động:**
+
+					#include <time.h>
+					#include <errno.h>
+
+					sem_t db_pool;
+					sem_init(&db_pool, 0, 0);  // Bắt đầu với 0 kết nối
+
+					// Tạo timeout: thời điểm hiện tại + 5 giây
+					struct timespec ts;
+					clock_gettime(CLOCK_REALTIME, &ts);  // Lấy thời gian hiện tại
+					ts.tv_sec += 5;                      // Cộng thêm 5 giây
+
+					// Chờ tối đa 5 giây để có kết nối
+					int ret = sem_timedwait(&db_pool, &ts);
+
+					if (ret == 0) {
+					    // Có kết nối trong vòng 5 giây
+					    printf("Đã lấy được kết nối database\n");
+					    use_database();
+					    sem_post(&db_pool);
+					} 
+					else if (errno == ETIMEDOUT) {
+					    // Hết 5 giây mà không có kết nối
+					    printf("Timeout: Không có kết nối database sau 5 giây\n");
+					    fallback_to_cache();  // Dùng cache thay vì chờ tiếp
+					}
+					else if (errno == EINTR) {
+					    // Bị ngắt bởi signal
+					    printf("Bị ngắt bởi signal\n");
+					}
+
+
+	* **Hàm lấy giá trị:**
+	
+		* **`sem_getvalue()`**
+
+				int sem_getvalue(sem_t *sem, int *sval);
+
+			*   sem:
+				
+				* Con trỏ đến semaphore
+				 
+			* 	sval:
+			
+				* Con trỏ đến biến nhận giá trị hiện tại
+			*  VD:
+
+					sem_t pool;
+					sem_init(&pool, 0, 10);  // 10 tài nguyên
+
+					int current_value;
+
+					// Lấy giá trị hiện tại
+					sem_getvalue(&pool, &current_value);
+					printf("Số tài nguyên khả dụng: %d\n", current_value);  // In: 10
+
+					// Sử dụng 3 tài nguyên
+					for (int i = 0; i < 3; i++) {
+					    sem_wait(&pool);
+					}
+
+					sem_getvalue(&pool, &current_value);
+					printf("Sau khi dùng 3 tài nguyên, còn: %d\n", current_value);  // In: 7
+
+					// Trả lại 1 tài nguyên
+					sem_post(&pool);
+					sem_getvalue(&pool, &current_value);
+					printf("Sau khi trả 1 tài nguyên, còn: %d\n", current_value);  // In: 8 				    
+
+	* **Hàm hủy/đóng:**
+	
+		* **`sem_destroy()`** - Hủy Unnamed Semaphore
+
+				int sem_destroy(sem_t *sem);
+
+			*   sem:
+				
+				* Con trỏ đến semaphore
+				
+			* 	VD:
+
+					sem_t sem;
+					sem_init(&sem, 0, 1);
+					// ... sử dụng
+					sem_destroy(&sem);  // Giải phóng tài nguyên
+
+					// Sau khi destroy, không được dùng sem nữa
+					// sem_wait(&sem);  // Lỗi!		
+
+		* **`sem_close()`** - Đóng Named Semaphore
+
+				int sem_close(sem_t *sem);
+
+			*   sem:
+				
+				* Con trỏ đến semaphore
+				
+			* 	VD:
+
+					// Process A
+					sem_t *db_pool = sem_open("/db_pool", O_CREAT, 0644, 10);
+					// ... sử dụng
+					sem_close(db_pool);  // Đóng trong process A
+
+					// Semaphore vẫn tồn tại trong hệ thống
+					// Process B vẫn có thể mở và sử dụng /db_pool
+
+		* **`sem_unlink()`** - Xóa Named Semaphore khỏi hệ thống
+
+				int sem_unlink(const char *name);
+
+			*   name:
+				
+				* Tên semaphore (giống lúc tạo với sem_open)
+				
+			* 	VD:
+
+					// Process 1: Tạo và sử dụng
+					sem_t *sem = sem_open("/counting_sem", O_CREAT, 0644, 5);
+					// ... sử dụng
+					sem_close(sem);
+					sem_unlink("/counting_sem");  // Đánh dấu xóa
+
+					// Process 2: Đang dùng /counting_sem
+					sem_t *sem2 = sem_open("/counting_sem", 0);  // Mở semaphore đã tồn tại
+					// ... sử dụng
+					sem_close(sem2);  
+					// Khi process 2 gọi sem_close, /counting_sem sẽ bị xóa hoàn toàn
+					// vì không còn process nào dùng nữa
+			
 																    					    					    			
    </details> 
