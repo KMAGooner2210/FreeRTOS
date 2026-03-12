@@ -985,9 +985,9 @@
    
 # CHƯƠNG 4: TASKS MANAGEMENT 
 <details>
-    <summary><strong>BÀI 1: TASK FUNCTION, TASK CREATION AND STACK DEPTH</strong></summary>
+    <summary><strong>BÀI 1: TASK ARCHITECTURE & CREATION</strong></summary>
 
-## **BÀI 1: TASK FUNCTION, TASK CREATION AND STACK DEPTH**
+## **BÀI 1: TASK ARCHITECTURE & CREATION**
 
 ### **I.  Task function**
 #### **1.1. Khái niệm**
