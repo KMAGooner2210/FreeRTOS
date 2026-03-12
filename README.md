@@ -15,7 +15,7 @@
   
 *	Việc quản lý heap không hiệu quả có thể dẫn đến các lỗi nghiêm trọng như không tạo được task, hệ thống treo hoặc reset bất ngờ.
   
-*   Trong FreeRTOS, heap là vùng RAM dành riêng cho cơ chế cấp phát động, được sử dụng khi hệ thống cần tạo các đối tượng kernel tại runtime.
+*   Trong FreeRTOS, heap là vùng RAM dành riêBAng cho cơ chế cấp phát động, được sử dụng khi hệ thống cần tạo các đối tượng kernel tại runtime.
 
 *   Heap khác với stack của từng task và khác với vùng dữ liệu tĩnh/global, các thành phần quan trọng sử dụng heap bao gồm:
  
@@ -1337,9 +1337,9 @@
 
 
 <details>
-    <summary><strong>BÀI 2: PRIORITY AND DELAY</strong></summary>
+    <summary><strong>BÀI 2: SCHEDULING & TIME MANAGEMENT</strong></summary>
 
-## **BÀI 2: TASK PRIORITY AND DELAY**
+## **BÀI 2: SCHEDULING & TIME MANAGEMENT**
 
 ### **I.  Task Priority**
 
