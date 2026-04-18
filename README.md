@@ -4102,3 +4102,624 @@
 			
 																    					    					    			
    </details> 
+
+
+# CHƯƠNG 7: TASK COMMUNICATION
+<details>
+    <summary><strong>BÀI 1: QUEUES VÀ QUẢN LÝ LUỒNG DỮ LIỆU</strong></summary>
+
+## **BÀI 1: QUEUES VÀ QUẢN LÝ LUỒNG DỮ LIỆU**
+
+### **I.  Tổng quan về Queue**
+
+#### **1.1. Khái niệm**
+
+*	Queue (hàng đợi) là một trong những cơ chế giao tiếp và đồng bộ hóa giữa các Task 
+  
+*	Đây là cấu trúc dữ liệu (FIFO) được thiết kế đặc biệt cho môi trường nhúng thời gian thực
+  
+*	Cho phép các Task trao đổi dữ liệu một cách an toàn, không cần chia sẻ biến toàn cục và không gây ra Race Condition
+  
+#### **1.2. Nguyên lý hoạt động**
+
+##### **1.2.1. Cơ chế đọc/ghi theo chuẩn FIFO và LIFO**
+
+*	**FIFO (First-In-First-Out):**
+
+	* Đây là cơ chế mặc định của Queue
+	
+	* Dữ liệu được đưa vào cuối Queue và được lấy ra từ đầu Queue
+	
+	*  Các hàm chính:
+	
+		* `xQueueSendToBack() / xQueueSend:` Thêm dữ liệu vào cuối Queue (FIFO)
+		
+		* `xQueueReceive():` Lấy dữ liệu từ đầu Queue      	
+
+*	**LIFO (Last-In-First-Out):**
+
+	* FreeRTOS hỗ trợ bằng cách thêm dữ liệu vào đầu Queue thông qua hàm `xQueueSendToFront().`
+
+##### **1.2.2. Cơ chế Copy-by-Value**
+
+*	Khi một Task gửi dữ liệu vào Queue, kernel sẽ sao chép toàn bộ nội dung dữ liệu vào vùng bộ nhớ đã được cấp phát sẵn cho Queue
+
+*  Task gửi không giữ tham chiếu đến dữ liệu gốc sau khi gửi thành công
+
+*  Task nhận cũng nhận được một bản sao hoàn chỉnh của dữ liệu 	
+
+#### **1.3. Các trạng thái Blocked của Task và cơ chế đánh thức (Unblock)**
+
+##### **1.3.1. Khái niệm**
+
+*	Khi Queue ở trạng thái đầy hoặc trống, Task sẽ chuyển sang trạng thái Blocked (chờ đợi) thay vì Busy-waiting
+
+##### **1.3.2. Các trường hợp Task bị Blocked**
+
+* **Tình huống 1: Gửi dữ liệu vào Queue đầy**
+
+	* Hàm gây Blocked:
+	
+		* `xQueueSendToBack() / xQueueSendToFront()`
+		
+	* Trạng thái Blocked của Task
+	
+		* Blocked trên Queue (đang chờ chỗ trống)
+		
+	* Điều kiện để thóat Blocked
+	
+		* Có Task khác nhận dữ liệu ra khỏi Queue      
+	
+* **Tình huống 2: Nhận dữ liệu từ Queue trống**
+
+	* Hàm gây Blocked:
+	
+		* `xQueueReceive()`
+		
+	* Trạng thái Blocked của Task
+	
+		* Blocked trên Queue (đang chờ dữ liệu)
+		
+	* Điều kiện để thóat Blocked
+	
+		* Có Task khác (hoặc ISR) gửi dữ liệu vào Queue
+
+##### **1.3.3. Cơ chế đánh thức (Unblock) tự động**
+
+* **Khi một Task (hoặc ISR) thực hiện thao tác ngược lại**
+
+	* Task A đang chờ gửi (Queue đầy) -> Task B gọi `xQueueReceive()` -> Queue có chỗ -> Task A được Unblock
+	
+	* Task C đang chờ nhận (Queue trống) -> Task D gọi `xQueueSend()` -> Queue có dữ liệu -> Task C được Unblock
+		
+* **Quy tắc ưu tiên khi Unblock:**
+	
+	* FreeRTOS luôn ưu tiên Task có mức ưu tiên cao nhất trong số các Task đang Blocked trên cùng một Queue.
+	
+	* Nếu nhiều Task cùng mức ưu tiên, Task nào Blocked trước sẽ được Unblock trước (FIFO trong cùng mức ưu tiên).  
+
+* **Thời gian chờ (Timeout):**
+	
+	* Các hàm gửi/nhận đều có tham số `xTicksToWait`.
+	
+	* `0` → Non-blocking. 
+
+	* `portMAX_DELAY` → Chờ vô thời hạn (Blocked mãi cho đến khi có sự kiện).
+	
+	* Giá trị cụ thể → Chờ tối đa một khoảng thời gian nhất định.
+
+##### **1.3.4. VD**
+
+* Giả sử có hai Task:
+
+	* Producer Task (ưu tiên 2): liên tục gửi dữ liệu vào Queue.
+	
+	* Consumer Task (ưu tiên 1): liên tục nhận dữ liệu từ Queue. 
+
+* Nếu Queue đầy:
+
+	* Producer Task chuyển sang Blocked.
+	
+	* Khi Consumer Task nhận một phần tử → Queue có chỗ → Producer Task được Unblock ngay lập tức và tiếp tục gửi.
+				 
+
+  	
+### **II.  Khởi tạo và quản lý vòng đời Queue**
+
+####  **2.1. xQueueCreateStatic**
+
+#####  **2.1.1. Khái niệm**
+
+*  Toàn bộ bộ nhớ cho Queue được cấp phát tĩnh tại thời điểm biên dịch, không sử dụng heap
+	
+#####  **2.1.2. Cách sử dụng**
+
+*  FreeRTOS yêu cầu cung cấp hai vùng bộ nhớ tĩnh:
+		
+	* Mảng lưu trữ dữ liệu Queue (`ucQueueStorage[]`)
+	
+	* Cấu trúc điều khiển Queue (`StaticQueue_t`) 
+
+* **Cú pháp hàm:**
+
+			QueueHandle_t xQueueCreateStatic(
+				UBaseType_t uxQueueLength, 				// Số lượng phần tử tối đa
+				UBaseType_t uxItemSize,							// Kích thước byte của mỗi phần tử
+				uint8_t *pucQueueStorageBuffer, 			// Con trỏ đến mảng lưu trữ dữ liệu
+				StaticQueue_t *pxQueueBuffer 				// Con trỏ đến cấu trúc điều khiển 
+			);
+
+	* Hàm trả về `QueueHandle_t` (handle của Queue). Nếu trả về `NULL` thì việc tạo Queue thất bại (thường do truyền sai tham số).
+	
+	* Toàn bộ bộ nhớ được cấp phát trước khi Scheduler khởi động (`vTaskStartScheduler()`). 
+		
+* **VD:**
+
+			#define QUEUE_LENGTH			10
+			#define ITEM_SIZE						sizeof(uint32_t)
+			
+			// Bộ nhớ tĩnh cho dữ liệu Queue
+			static uint8_t ucQueueStorage[QUEUE_LENGTH * ITEM_SIZE];
+
+			// Cấu trúc điều khiển Queue
+			static StaticQueue_t xQueueBuffer;
+
+			// Handle Queue
+			QueueHandle_t xMyQueue;
+
+	* **Trong hàm main():**
+	
+			xMyQueue = xQueueCreateStatic(QUEUE_LENGTH, ITEM_SIZE, ucQueueStorage, &xQueueBuffer);
+		
+	* **Lưu ý:**
+	
+		*  Phải bật `configSUPPORT_STATIC_ALLOCATION = 1` trong `FreeRTOSConfig.h`.
+		
+		*  Kích thước mảng `ucQueueStorage` bắt buộc phải đúng: `uxQueueLength × uxItemSize`.
+		 
+		*  Queue sau khi tạo không thể thay đổi kích thước.
+	
+####  **2.2. xQueueCreateDynamic, vQueueDelete và xQueueReset**
+
+#####  **2.2.1. Khái niệm**
+
+*  Cấp phát động sử dụng heap của FreeRTOS (thông qua `pvPortMalloc`).
+	
+#####  **2.2.2. Cách sử dụng**
+
+*  Trong FreeRTOS hiện đại, xQueueCreate là macro được định nghĩa lại tùy theo cấu hình:
+		
+		QueueHandle_t xQueueCreate(
+		    UBaseType_t uxQueueLength,
+		    UBaseType_t uxItemSize
+		);
+	
+	* Nếu `configSUPPORT_DYNAMIC_ALLOCATION = 1`, hàm sẽ tự động cấp phát bộ nhớ từ heap.
+
+	* Trả về `NULL`nếu không đủ heap.
+	
+#####  **2.2.3. Các hàm quản lý vòng đời Queue**
+
+*  **vQueueDelete(QueueHandle_t xQueue):**
+
+	*  Xóa Queue và giải phóng toàn bộ bộ nhớ đã cấp phát (chỉ áp dụng với Queue được tạo động).
+	
+	*  Tất cả các Task đang Blocked trên Queue sẽ được Unblock với trạng thái `pdFAIL`.
+	
+	*  Sau khi xóa, handle trở nên không hợp lệ. 
+
+*  **xQueueReset(QueueHandle_t xQueue):**
+
+	*  Xóa sạch toàn bộ dữ liệu trong Queue mà không xóa Queue.
+	
+	*  Tất cả Task đang Blocked chờ gửi/nhận sẽ được Unblock.
+	
+	*  Trả về `pdPASS` nếu thành công.
+	 
+			
+### **III.  Các phương thức gửi và nhận dữ liệu**
+
+####  **3.1. Các hàm gửi dữ liệu**
+
+#####  **3.1.1.xQueueSendToBack()**
+
+*  Cơ chế:
+
+	* FIFO 
+	
+*  Vị trí thêm dữ liệu:
+
+	* Cuối Queue
+	
+*  Ứng dụng:
+
+	* Hàng đợi thông thường, thuứ tự bảo toàn
+	
+*  Trả về khi Queue đầy
+		
+		errQUEUE_FULL
+
+#####  **3.1.2.xQueueSend**
+
+*  Tương đương `xQueueSendToBack()`
+
+#####  **3.1.3.xQueueSendToFront()**
+
+*  Cơ chế:
+
+	* LIFO
+	
+*  Vị trí thêm dữ liệu:
+
+	* Đầu Queue
+	
+*  Ứng dụng:
+
+	* Xử lý ưu tiên cao, tin nhắn khẩn cấp
+	
+*  Trả về khi Queue đầy
+		
+		errQUEUE_FULL
+
+#####  **3.1.4.xQueueOverwrite()**
+
+*  Cơ chế:
+
+	* Overwrite
+	
+*  Vị trí thêm dữ liệu:
+
+	* Thay thế item duy nhất
+	
+*  Ứng dụng:
+
+	* Queue độ dài = 1 (thay thế giá trị cũ)
+	
+*  Trả về khi Queue đầy
+		
+	* Không bao giờ (luôn thành công)
+				
+#####  **3.1.5. Cú pháp chung**
+
+		BaseType_t xQueueSendToBack(
+		    QueueHandle_t xQueue,
+		    const void * pvItemToQueue,   // Con trỏ đến dữ liệu cần gửi (Copy-by-Value)
+		    TickType_t xTicksToWait       // Thời gian chờ tối đa (ticks)
+		);
+
+		BaseType_t xQueueSendToFront( ... );   // Tương tự
+		BaseType_t xQueueOverwrite( ... );     // Tương tự
+		
+* **Lưu ý:**
+
+	*  Chỉ nên sử dụng khi Queue được tạo với `uxQueueLength` = 1.
+	
+	*  Nếu Queue đã có dữ liệu, hàm sẽ ghi đè dữ liệu cũ mà không báo lỗi. 
+
+####  **3.2. Các hàm nhận dữ liệu**
+
+#####  **3.2.1.xQueueReceive()**
+
+*  Hành vi:
+
+	* Lấy dữ liệu + xóa khỏi Queue 
+	
+*  Dữ liệu sau khi nhận:
+
+	* Item bị xóa khỏi Queue
+	
+*  Ứng dụng:
+
+	* Consumer Task xử lý dữ liệu một lần
+	
+#####  **3.2.2.xQueuePeek()**
+
+*  Hành vi:
+
+	* Chỉ đọc dữ liệu (không xóa)
+	
+*  Dữ liệu sau khi nhận:
+
+	* Item vẫn còn trong Queue
+	
+*  Ứng dụng:
+
+	* Kiểm tra dữ liệu trước khi quyết định xử lý
+
+				
+#####  **3.2.3. Cú pháp chung**
+
+		BaseType_t xQueueReceive(
+		    QueueHandle_t xQueue,
+		    void * const pvBuffer,        // Con trỏ đến vùng nhớ nhận dữ liệu
+		    TickType_t xTicksToWait
+		);
+
+		BaseType_t xQueuePeek( ... );     // Tương tự
+		
+* **VD:**
+
+		// Producer Task - Gửi theo FIFO
+		void vProducerTask(void *pvParameters)
+		{
+		    uint32_t ulValue = 100;
+		    for(;;)
+		    {
+		        xQueueSendToBack(xMyQueue, &ulValue, portMAX_DELAY);
+		        ulValue++;
+		        vTaskDelay(pdMS_TO_TICKS(200));
+		    }
+		}
+
+		// Consumer Task - Nhận và xóa
+		void vConsumerTask(void *pvParameters)
+		{
+		    uint32_t ulReceived;
+		    for(;;)
+		    {
+		        if(xQueueReceive(xMyQueue, &ulReceived, portMAX_DELAY) == pdPASS)
+		        {
+		            // Xử lý ulReceived
+		        }
+		    }
+		}
+
+### **IV.  Tương tác với Queue trong môi trường ngắt**
+
+####  **4.1. Quy tắc**
+
+#####  **4.1.1. Giới thiệu**
+
+*  Không bao giờ gọi các hàm API thông thường (`xQueueSend, xQueueReceive, xQueueSendToFront…`) bên trong ISR.
+
+	* Những hàm này có thể gọi scheduler hoặc thực hiện block, dẫn đến HardFault hoặc hệ thống crash.
+	
+*Chỉ được sử dụng các hàm có hậu tố `FromISR`.
+
+* ISR không được phép block (không có timeout thực sự).
+	
+#####  **4.1.2. Quy tắc sử dụng API trong ngắt**
+
+
+*  **Hàm Task-level:**
+
+	* `xQueueSendToBack()`
+		
+		*  Hàm ISR tương ứng: `xQueueSendFromISR()`
+
+		* Chức năng: Gửi vào cuối Queue (FIFO)
+
+		*  Tham số đặc biệt: `pxHigherPriorityTaskWoken`
+
+	* `xQueueSendToFront()`
+		
+		*  Hàm ISR tương ứng: `xQueueSendToFrontFromISR()`
+
+		* Chức năng: Gửi vào đầu Queue (LIFO)
+
+		*  Tham số đặc biệt: `pxHigherPriorityTaskWoken`
+
+	* `xQueueOverwrite()`
+		
+		*  Hàm ISR tương ứng: `xQueueOverwriteFromISR()`
+
+		* Chức năng: Ghi đè (Queue độ dài = 1)
+
+		*  Tham số đặc biệt: `pxHigherPriorityTaskWoken`
+
+	* `xQueueReceive()`
+		
+		*  Hàm ISR tương ứng: `xQueueReceiveFromISR()`
+
+		* Chức năng: Nhận và xóa dữ liệu
+
+		*  Tham số đặc biệt: `pxHigherPriorityTaskWoken`
+
+	* `xQueuePeek()`
+		
+		*  Hàm ISR tương ứng: `xQueuePeekFromISR()`
+
+		* Chức năng: Đọc mà không xóa
+
+		*  Tham số đặc biệt: `pxHigherPriorityTaskWoken`
+
+*  **Cú pháp:**
+
+		BaseType_t xQueueSendFromISR(
+		    QueueHandle_t xQueue,
+		    const void *pvItemToQueue,          // Dữ liệu cần gửi (Copy-by-Value)
+		    BaseType_t *pxHigherPriorityTaskWoken, // Cờ đánh thức Task
+		    TickType_t xTicksToWait             // Luôn là 0 trong ISR
+		);
+					
+
+#####  **4.1.3. Cơ chế Yielding trong ngắt (portYIELD_FROM_ISR / portEND_SWITCHING_ISR)**
+
+
+*  Khi ISR gửi dữ liệu vào Queue, nếu có Task đang Blocked chờ dữ liệu (hoặc đang chờ chỗ trống), kernel cần quyết định:
+
+	* Task đó có ưu tiên cao hơn Task đang chạy trước khi vào ngắt hay không
+		
+*  Nếu có, FreeRTOS phải chuyển ngữ cảnh ngay lập tức sau khi ISR kết thúc (context switch) để Task ưu tiên cao được chạy liền mà không phải chờ đến tick tiếp theo.
+
+* Cơ chế Yielding:
+
+	* 1. Khai báo biến cục bộ trong ISR:
+
+				BaseType_t xHigherPriorityTaskWoken = pdFALSE;  
+
+	* 2. Gọi hàm FromISR và truyền địa chỉ của biến:
+
+				xQueueSendFromISR(xMyQueue, &data, &xHigherPriorityTaskWoken, 0);
+
+	* 3. Sau khi gọi xong tất cả các hàm FromISR, kiểm tra và thực hiện Yield:
+
+				if(xHigherPriorityTaskWoken == pdTRUE)
+				{
+				    portYIELD_FROM_ISR();                    // Cách viết mới (khuyến nghị)
+				    // hoặc
+				    portEND_SWITCHING_ISR(pdTRUE);           // Cách viết cũ (vẫn tương đương)
+				} 
+				
+		* Nếu hàm `FromISR` unblock được một Task có ưu tiên cao hơn Task đang chạy trước ISR, kernel sẽ tự động gán `*pxHigherPriorityTaskWoken = pdTRUE`.
+		
+		*  `portYIELD_FROM_ISR(pdTRUE)` sẽ yêu cầu PendSV (trên Cortex-M3) thực hiện context switch ngay sau khi ISR trả về.
+		
+		*   Kết quả: Task được unblock sẽ chạy ngay lập tức, đảm bảo tính thời gian thực tối ưu (low latency).
+		
+* VD:
+
+			 void USART1_IRQHandler(void)
+			{
+			    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+			    uint8_t ucReceivedByte;
+
+			    if(USART_GetITStatus(USART1, USART_IT_RXNE) != RESET)
+			    {
+			        ucReceivedByte = USART_ReceiveData(USART1);
+			        
+			        // Gửi byte vào Queue cho Task xử lý
+			        xQueueSendFromISR(xUARTQueue, &ucReceivedByte, 
+			                         &xHigherPriorityTaskWoken, 0);
+			    }
+
+			    // Yield nếu cần chuyển ngữ cảnh
+			    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+			}
+
+* Lưu ý:
+
+	*  Phải bật `configUSE_PORT_OPTIMISED_TASK_SELECTION = 1` và `configCHECK_FOR_STACK_OVERFLOW` để tối ưu.	
+	
+	*  Không được gọi `vTaskDelay` hoặc bất kỳ hàm block nào trong ISR.
+
+
+### **V.  Nhóm hàng đợi (Queue Sets)**
+
+####  **5.1. Khái niệm**
+
+* Queue Set là một tính năng nâng cao của FreeRTOS cho phép một Task có thể chờ dữ liệu đồng thời từ nhiều Queue (và cả Semaphore/Mutex) mà không cần polling hoặc tạo nhiều Task riêng biệt.
+
+*  Thay vì mỗi Queue có một Task Consumer riêng, Queue Set cho phép một Task duy nhất lắng nghe tất cả các kênh cùng lúc, tiết kiệm tài nguyên và dễ quản lý hơn.
+
+####  **5.2. Khởi tạo và cấu hình (Sử dụng xQueueCreateSet và xQueueAddToSet)**
+
+#####  **5.2.1. Cú pháp tạo Queue Set:**
+
+	QueueSetHandle_t xQueueCreateSet(UBaseType_t uxEventQueueLength);
+
+* uxEventQueueLength: Số lượng tối đa các sự kiện (Queue/Semaphore) có thể được thêm vào Set. Thường đặt bằng tổng số Queue + Semaphore cần theo dõi.
+
+#####  **5.2.2. Cấp phát tĩnh**
+
+	QueueSetHandle_t xQueueCreateSetStatic(
+	    UBaseType_t uxEventQueueLength,
+	    StaticQueue_t *pxQueueSetBuffer   // Bộ nhớ tĩnh cho cấu trúc Set
+	);
+
+#####  **5.2.3. Thêm Queue/Semaphore vào Set:**
+
+	BaseType_t xQueueAddToSet(
+	    QueueHandle_t xQueueOrSemaphore,   // Handle của Queue hoặc Semaphore
+	    QueueSetHandle_t xQueueSet         // Handle của Queue Set
+	);
+
+* Có thể thêm:
+
+	*  Queue (bất kỳ loại nào đã tạo).
+	
+	*   Binary Semaphore, Counting Semaphore.
+	
+	*    Mutex, Recursive Mutex.
+	
+* Lưu ý:
+
+	*   Một Queue/Semaphore chỉ được thêm vào một Queue Set duy nhất.
+	
+	*   Sau khi thêm, không thể gỡ ra (chỉ có thể xóa toàn bộ Set).
+	
+	*   Phải bật cấu hình trong `FreeRTOSConfig.h`:  
+
+			#define configUSE_QUEUE_SETS    1
+
+* VD: Khởi tạo Queue Set tĩnh
+
+			#define QUEUE_SET_LENGTH    5   // Có thể chứa tối đa 5 Queue/Semaphore
+
+			static StaticQueue_t xQueueSetBuffer;
+			QueueSetHandle_t xMyQueueSet;
+
+			// Tạo Set trước khi tạo Task
+			xMyQueueSet = xQueueCreateSetStatic(QUEUE_SET_LENGTH, &xQueueSetBuffer);
+
+			// Thêm các Queue đã tạo trước đó
+			xQueueAddToSet(xUART1Queue, xMyQueueSet);
+			xQueueAddToSet(xUART2Queue, xMyQueueSet);
+			xQueueAddToSet(xTimerQueue, xMyQueueSet);
+	
+####  **5.3. Cơ chế lắng nghe đa luồng (Sử dụng xQueueSelectFromSet)**
+
+#####  **5.3.1. Cơ chế lắng nghe đa luồng (Sử dụng xQueueSelectFromSet)**
+
+* Đây là hàm cốt lõi cho phép Task chờ và nhận biết ngay lập tức kênh nào có dữ liệu.
+
+#####  **5.3.2. Cú pháp**
+
+			 QueueSetMemberHandle_t xQueueSelectFromSet(
+			    QueueSetHandle_t xQueueSet,
+			    TickType_t xTicksToWait
+			);
+
+* Trả về:
+	
+	*  Handle của Queue/Semaphore có sự kiện (đã sẵn sàng).
+		
+	*  `NULL` nếu hết thời gian chờ mà không có sự kiện nào. 
+
+* Quy trình sử dụng điển hình trong Task:
+	
+	*  Task gọi `xQueueSelectFromSet()` → Blocked cho đến khi có ít nhất một Queue/Semaphore trong Set có dữ liệu.
+		
+	*  Nhận được handle → Xác định đó là Queue nào → Gọi xQueueReceive() (hoặc xSemaphoreTake()) trên handle đó.
+	
+	*  Xử lý dữ liệu và lặp lại.
+
+#####  **5.3.3. VD**
+
+* Consumer Task lắng nghe đa kênh
+
+			void vMultiChannelTask(void *pvParameters)
+			{
+			    QueueSetMemberHandle_t xActivatedMember;
+
+			    for(;;)
+			    {
+			        // Chờ bất kỳ Queue nào trong Set có dữ liệu
+			        xActivatedMember = xQueueSelectFromSet(xMyQueueSet, portMAX_DELAY);
+
+			        if(xActivatedMember != NULL)
+			        {
+			            uint32_t ulData;
+
+			            // Xác định và xử lý Queue tương ứng
+			            if(xActivatedMember == xUART1Queue)
+			            {
+			                xQueueReceive(xUART1Queue, &ulData, 0);
+			                // Xử lý dữ liệu UART1
+			            }
+			            else if(xActivatedMember == xUART2Queue)
+			            {
+			                xQueueReceive(xUART2Queue, &ulData, 0);
+			                // Xử lý dữ liệu UART2
+			            }
+			            else if(xActivatedMember == xTimerQueue)
+			            {
+			                xQueueReceive(xTimerQueue, &ulData, 0);
+			                // Xử lý sự kiện Timer
+			            }
+			        }
+			    }
+			}
+						
+   </details> 
+
