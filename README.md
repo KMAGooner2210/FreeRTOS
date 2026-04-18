@@ -4723,3 +4723,607 @@
 						
    </details> 
 
+
+<details>
+    <summary><strong>BÀI 2: GIAO TIẾP DỮ LIỆU NÂNG CAO VÀ CỜ SỰ KIỆN</strong></summary>
+
+## **BÀI 2: GIAO TIẾP DỮ LIỆU NÂNG CAO VÀ CỜ SỰ KIỆN**
+
+### **I.  Stream Buffers**
+
+#### **1.1. Khái niệm**
+
+*	Stream Buffer là một trong những cơ chế giao tiếp tiên tiến nhất của FreeRTOS, được thiết kế đặc biệt để xử lý luồng dữ liệu byte liên tục thay vì các item có kích thước cố định như Queue
+  
+ 
+#### **1.2. Khởi tạo và đặc điểm**
+
+##### **1.2.1. Đặc điểm**
+
+*	**Zero-copy:**
+
+	* Dữ liệu được viết trực tiếp vào vùng circular buffer mà không cần sao chép qua các vùng nhớ trung gian không cần thiết
+	
+	* Khi Task nhận dữ liệu, FreeRTOS chỉ copy đúng số byte cần thiết, giảm thiểu overhead đáng kể so với Queue khi truyền khối dữ liệu lớn 
+	
+*	**Single Producer - Single Consumer:**
+
+	* Được thiết kế để chỉ có một Task/ISR gửi và một Task nhận
+	
+	*  Điều này giúp loại bỏ hoàn toàn nhu cầu Mutex hoặc Critical Section 	
+
+*	ISR hoặc DMA có thể gửi dữ liệu vào Stream Buffer mà không làm gián đoạn luồng xử lý
+
+* Tiết kiệm RAM hơn Queue khi truyền dữ liệu có độ dài thay đổi (không lãng phí không gian cố định cho mỗi item).
+
+##### **1.2.2. Khởi tạo**
+
+*	FreeRTOS cung cấp hai cách khởi tạo
+
+	* **Cấp phát tĩnh:**
+	
+			StreamBufferHandle_t xStreamBufferCreateStatic(
+				size_t xBufferSizeBytes			// Kích thước circular buffer (byte)
+				size_t xTriggerLevelBytes			// Mức byte tối thiểu để đánh thức task
+				uint8_t *pucStreamBufferStorageArea,				// Bộ nhớ tĩnh cho buffer
+				StaticStreamBuffer_t *pxStreamBufferStruct								// Cấu trúc điều khiển tĩnh
+				);
+			
+		* VD:
+
+
+				#define 	STREAM_BUFFER_SIZE				256U
+				#define	TRIGGER_LEVEL					16U	  // Đánh thức Task khi có ít nhất 16 byte	
+				
+				// Bộ nhớ tĩnh cho buffer
+				static uint8_t ucStreamBufferStorage[STREAM_BUFFER_SIZE];
+				
+				// Cấu trúc điều khiển tĩnh
+				static StaticStreamBuffer_t  xStreamBufferStruct;
+
+				// Handle Stream Buffer
+				StreamBufferHandle_t  xUARTStreamBuffer;	
+				
+
+	* **Khởi tạo trong main() hoặc trước khi tạo Task:**
+	
+			xUARTStreamBuffer = xStreamBuferCreateStatic(
+					STREAM_BUFFER_SIZE,
+					TRIGGER_LEVEL,
+					ucStreamBufferStorage,
+					&xStreamBufferStruct
+				);
+
+	* **Lưu ý:**
+	 
+		* Phải bật : `#define configUSE_STREAM_BUFFERS		1`
+		* Và `configSUPPORT_STATIC_ALLOCATION = 1`
+
+ 
+#### **1.3. Cơ chế Trigger Level và gửi nhận**
+
+##### **1.3.1. Khái niệm**
+
+*	Trigger Level là tính năng giúp tối ưu hiệu suất:
+
+	* Task chỉ bị đánh thức khi số byte trong Stream Buffer đạt hoặc vượt mức Trigger Level
+	
+	* Tránh tình trạng Task bị đánh thức liên tục chỉ vì vài byte, giảm context switch 	
+
+##### **1.3.2. Các hàm gửi và nhận**
+
+* **Hàm**
+
+	* `xStreamBufferSend()`
+	
+		* Ngữ cảnh : Task
+		
+		* Gửi dữ liệu vào Stream Buffer 
+		
+		* Trả về số byte thực tế đã gửi   
+	
+	* `xStreamBufferSendFromISR()`
+	
+		* Ngữ cảnh : ISR
+		
+		* Gửi từ ngắt (DMA/ISR)
+		
+		* Trả về số byte thực tế đã gửi
+
+		
+	* `xStreamBufferReceiveFromISR()`
+	
+		* Ngữ cảnh : ISR
+		
+		* Nhận từ ngắt
+		
+		* Trả về số byte thực tế đã nhận    
+	
+* **Cú pháp:**
+
+			// Gửi từ Task hoặc ISR
+			size_t xStreamBufferSendFromISR(
+				StreamBufferHandler_t xStreamBuffer,
+				const void *pvTxData,			// Dữ liệu cần gửi
+				size_t xDataLengthBytes,		// Số byte cần gửi
+				BaseType_t		*pxHigherPriorityTaskWoken
+			);
+
+			// Nhận từ Task
+			size_t xStreamBufferReceive(
+				StreamBufferHandle_t xStreamBuffer,
+				void *pvRxData,
+				size_t xBufferLengthBytes,
+				TickType_t xTicksToWait
+			);
+
+* **VD: ISR (UART DMA) + Task Consumer**
+
+			// Trong USART1_IRQHandler hoặc DMA Complete ISR
+			void DMA1_Channel5_IRQHandler(void){
+				BaseType_t  xHigherPriorityTaskWoken = pdFALSE;
+				uint8_t ucDMA_Buffer[64];
+
+				// Giả sử DMA đã copy dữ liệu vào ucDMA_Buffer
+				// (hoặc cấu hình DMA ghi trực tiếp vào Stream Buffer nếu advanced)
+				xStreamBufferSendFromISR(xUARTStreamBuffer,
+										 ucDMA_Buffer,
+										 DMA_GetCurrDataCounter(DMA1_Channel5),
+										 &xHigherPriorityTaskWoken);
+
+				portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+			}
+
+			// Task Consumer
+			void vUART_ProcessingTask(void *pvParameters){
+				uint8_t ucReceived[256];
+				size_t xReceivedBytes;
+
+				for(;;)
+				{
+					// Chờ đến khi đủ Trigger Level (16 byte)
+					xReceiveBytes = xStreamBufferReceive(xUARTStreamBuffer,
+										                 ucReceived,
+										                 sizeof(ucReceived),
+										                 portMAX_DELAY);
+										                 
+					// Xử lý luồng dữ liệu
+					// ...
+				}
+			}
+
+
+
+  	
+### **II.  Message Buffers (Xử lý các gói tin - Packets)**
+
+####  **2.1. Khái niệm**
+
+*  Message Buffer là cơ chế giao tiếp được thiết kế đặc biệt để truyền nhận các bản tin (messages/packets) có độ dài thay đổi
+
+*  Nó được xây dựng trên nền tảng Stream Buffer nhưng bổ sung tính năng tự động thêm Header chứa độ dài bản tin, giúp đảm bảo tính nguyên vẹn của từng gói tin khi truyền qua lại giữa Task hoặc giữa ISR và Task 
+	
+####  **2.2. Cấu trúc của Message Buffer**
+
+*  **Cấu trúc nội bộ của Message Buffer:**
+		
+	* Về bản chất, Message Buffer là một Stream Buffer được mở rộng.
+	
+	* Khi gọi hàm gửi, FreeRTOS tự động:
+	
+		* 1. Thêm một Header 4 byte (hoặc `size_t` tùy cấu hình) ở mỗi đầu message, chứa độ dài thực tế của bản tin
+		
+		* 2. Sau đó ghi dữ liệu của message vào buffer vòng  
+
+	* Khi nhận, hàm nhận sẽ đọc Header trước để biết chính xác bao nhiêu byte cần copy, sau đó trả về đúng một message hoàn chỉnh cho Task.
+
+
+
+* **Đặc điểm:**
+	
+	* Tự động phân tách message: 
+	
+		* Không xảy ra tình trạng hai message bị dính vào nhau như khi dùng Stream Buffer thuần túy.
+
+	* Zero-copy: 
+	
+		* Vẫn giữ ưu điểm của Stream Buffer (dữ liệu chỉ được copy một lần khi cần thiết).
+
+	* Single Producer – Single Consumer: 
+	
+		* Giống Stream Buffer, chỉ cho phép một nguồn gửi và một đích nhận.
+
+	* Hỗ trợ ISR/DMA: 
+	
+		* Có đầy đủ các hàm `FromISR`.
+		
+	* Tiêu tốn thêm một ít RAM so với Stream Buffer (do Header), nhưng bù lại rất tiện lợi khi xử lý packet. 
+				
+* **Khởi tạo Message Buffer:**
+
+			// Cấp phát tĩnh
+			MessageBufferHandle_t xMessageBufferCreateStatic(
+			    size_t xBufferSizeBytes,           // Kích thước buffer vòng (byte)
+			    uint8_t *pucMessageBufferStorageArea,
+			    StaticMessageBuffer_t *pxMessageBufferStruct
+			);
+
+	* **VD: Khai báo tĩnh cho gói tin 128 byte**
+	
+			#define MESSAGE_BUFFER_SIZE     512U   // Phải đủ lớn để chứa nhiều packet + header
+
+			static uint8_t ucMessageBufferStorage[MESSAGE_BUFFER_SIZE];
+			static StaticMessageBuffer_t xMessageBufferStruct;
+
+			MessageBufferHandle_t xPacketBuffer;
+		
+	* **Khởi tạo:**
+	
+			xPacketBuffer = xMessageBufferCreateStatic(MESSAGE_BUFFER_SIZE,
+			                                           ucMessageBufferStorage,
+			                                           &xMessageBufferStruct);
+
+	* **Cấu hình FreeRTOS:**
+	
+			#define configUSE_STREAM_BUFFERS    1   // Message Buffer dựa trên Stream Buffer
+			#define configSUPPORT_STATIC_ALLOCATION 1
+			                                           	
+####  **2.3. Ứng dụng truyền nhận bản tin**
+
+#####  **2.3.1. Các hàm chính**
+
+*  **xMessageBufferSend():**
+
+	* Ngữ cảnh: Task
+	
+	* Chức năng: Gửi một message hoàn chỉnh
+	
+	* Trả về số byte đã gửi (bao gồm header)     
+
+*  **xMessageBufferSendFromISR():**
+
+	* Ngữ cảnh: ISR
+	
+	* Chức năng: Gửi từ ngắt (DMA/ISR)
+	
+	* Trả về số byte đã gửi 
+
+*  **xMessageBufferReceive():**
+
+	* Ngữ cảnh: Task
+	
+	* Chức năng: Nhận đúng một message hoàn chỉnh
+	
+	* Trả về số byte thực tế của message
+
+*  **xMessageBufferReceiveFromISR():**
+
+	* Ngữ cảnh: ISR
+	
+	* Chức năng: Nhận từ ngắt (ít dùng)
+	
+	* Trả về số byte thực tế của message
+
+
+#####  **2.3.2. Cú pháp**
+
+*  Trong FreeRTOS hiện đại, xQueueCreate là macro được định nghĩa lại tùy theo cấu hình:
+		
+		// Gửi message
+		size_t xMessageBufferSend(
+		    MessageBufferHandle_t xMessageBuffer,
+		    const void *pvTxData,          // Con trỏ đến packet
+		    size_t xDataLengthBytes,       // Độ dài packet (không cần header)
+		    TickType_t xTicksToWait
+		);
+
+		// Nhận message
+		size_t xMessageBufferReceive(
+		    MessageBufferHandle_t xMessageBuffer,
+		    void *pvRxData,
+		    size_t xBufferLengthBytes,     // Kích thước buffer nhận (phải >= packet lớn nhất)
+		    TickType_t xTicksToWait
+		);
+	
+#####  **2.3.3. VD**
+
+*  **VD1: Truyền nhận packet UART/Protocol**
+
+			// Task Producer - Tạo và gửi packet
+			void vPacketProducerTask(void *pvParameters){
+				uint8_t ucPacket[64];
+				for(;;)
+				{
+						// Tạo packet có độ dài thay đổi
+						uint8_t ucLength = /* tính toán độ dài */;
+						// Điền dữ liệu vào ucPacket...
+
+						xMessageBufferSend(xPacketBuffer, ucPacket, ucLength, portMAX_DELAY);
+						vTaskDelay(pdMS_TO_TICKS(100));
+				}
+			}
+
+			// Task Consumer - Nhận packet hoàn chỉnh
+			void vPacketConsumerTask(void *pvParameters){
+				uint8_t ucReceivedPacket[64];
+				size_t xReceivedBytes;
+
+				for(;;)
+				{
+					xReceivedBytes = xMessageBufferReceive(xPacketBuffer,
+														   ucReceivedPacket,
+														   sizeof(ucReceivedPacket),
+														   portMAX_DELAY);
+					// ucReceivedPacket giờ đã là một packet hoàn chỉnh
+					// Xử lý Protocol, ...
+				}
+			} 
+
+*  **VD2: ISR gửi packet (DMA Complete)**
+
+			void DMA1_Channel5_IRQHandler(void)
+			{
+			    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+			    uint8_t ucPacket[32];
+			    size_t xLength = /* lấy độ dài từ DMA */;
+
+			    xMessageBufferSendFromISR(xPacketBuffer, ucPacket, xLength,
+			                              &xHigherPriorityTaskWoken);
+
+			    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+			}
+	 
+			
+### **III.  Event Groups**
+
+####  **3.1. Khái niệm**
+
+*  Event Group là cơ chế đồng bộ hóa và giao tiếp nhẹ nhất và tiết kiệm RAM nhất trong FreeRTOS
+
+* Nó cho phép các Task và ISR thông báo và chờ đợi nhiều sự kiện cùng lúc thông qua một tập hợp các bit cờ (FLAGS) 
+
+
+####  **3.2. Khởi tạo và thiết lập cờ**
+
+#####  **3.2.1.Khái niệm**
+
+*  Một Event Group là một biến 32-bit (trên Cortex-M3), trong đó mỗi bit đại diện cho một sự kiện (flag).
+
+* Bit 0 đến bit 31 có thể được sử dụng độc lập hoặc kết hợp.
+	
+*  Task có thể đặt bit (set), xóa bit (clear), và chờ một hoặc nhiều bit theo logic AND/OR.
+
+#####  **3.2.2.Khởi tạo**
+
+		// Cấp phát động (không khuyến khích)
+		EventGroupHandle_t xEventGroupCreate(void);
+
+		// Cấp phát tĩnh (ưu tiên)
+		EventGroupHandle_t xEventGroupCreateStatic(StaticEventGroup_t *pxEventGroupBuffer);
+	
+#####  **3.2.3.VD**
+
+		#define EVENT_BITS_UART_RX      (1UL << 0)   // Bit 0: UART nhận xong
+		#define EVENT_BITS_ADC_DONE     (1UL << 1)   // Bit 1: ADC chuyển đổi xong
+		#define EVENT_BITS_TIMER        (1UL << 2)   // Bit 2: Timer timeout
+		#define EVENT_BITS_ERROR        (1UL << 3)   // Bit 3: Có lỗi xảy ra
+
+		static StaticEventGroup_t xEventGroupBuffer;
+		EventGroupHandle_t xSystemEventGroup;
+
+* Khởi tạo trong `main()` hoặc trước khi tạo Task:
+
+		xSystemEventGroup = xEventGroupCreateStatic(&xEventGroupBuffer);
+
+			
+#####  **3.2.4. Các hàm thiết lập và xóa cờ**
+
+* **xEventGroupSetBits():**
+
+	* Ngữ cảnh: Task
+	
+	* Chức năng: Đặt một hoặc nhiều bit
+	
+	* Giá trị trả về: Các bit đã được set   
+
+* **xEventGroupSetBitsFromISR():**
+
+	* Ngữ cảnh: ISR
+	
+	* Chức năng: Đặt bit từ ngắt (ISR-safe)
+	
+	* Giá trị trả về: pdPASS / pdFAIL
+
+* **xEventGroupClearBits():**
+
+	* Ngữ cảnh: Task
+	
+	* Chức năng: Xóa một hoặc nhiều bit
+	
+	* Giá trị trả về: Các bit trước khi xóa
+
+* **xEventGroupClearBitsFromISR():**
+
+	* Ngữ cảnh: ISR
+	
+	* Chức năng: Xóa bit từ ngắt
+	
+	* Giá trị trả về: pdPASS / pdFAIL
+			
+* **VD:**
+
+			// Từ Task hoặc ISR thông báo sự kiện
+			xEventGroupSetBits(xSystemEventGroup, EVENT_BITS_UART_RX | EVENT_BITS_ADC_DONE);
+
+			// Từ ISR (ví dụ UART DMA hoàn thành)
+			BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+			xEventGroupSetBitsFromISR(xSystemEventGroup, 
+			                          EVENT_BITS_UART_RX, 
+			                          &xHigherPriorityTaskWoken);
+			portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+
+####  **3.3. Cơ chế chờ sự kiện**
+
+*  Hàm quan trọng nhất của Event Group là `xEventGroupWaitBits()`, cho phép Task chờ theo logic AND hoặc logic OR.
+
+* Cú pháp:
+
+		EventBits_t xEventGroupWaitBits(
+		    EventGroupHandle_t xEventGroup,
+		    const EventBits_t uxBitsToWaitFor,     // Các bit cần chờ
+		    const BaseType_t xClearOnExit,         // pdTRUE: tự động xóa bit sau khi chờ thành công
+		    const BaseType_t xWaitForAllBits,      // pdTRUE = AND, pdFALSE = OR
+		    TickType_t xTicksToWait                // Thời gian chờ
+		);
+	
+	*  `uxBitsToWaitFor`: Mặt nạ bit cần chờ (ví dụ: `EVENT_BITS_UART_RX | EVENT_BITS_ADC_DONE`).
+	
+	*  `xClearOnExit:` 
+	
+		* `pdTRUE` → Tự động xóa các bit đã chờ thành công
+		
+		*  `pdFALSE` → Giữ nguyên bit (Task phải tự xóa sau). 
+
+	*  `xWaitForAllBits:` 
+	
+		* `pdTRUE` → AND: Phải chờ tất cả các bit được set mới thoát.
+		
+		*  `pdFALSE` → OR: Chỉ cần một trong các bit được set là thoát.
+		
+	* Trả về: Giá trị hiện tại của các bit trong Event Group (sau khi chờ). 
+	
+* **VD:**
+
+	* VD1:
+
+			void vEventHandlerTask(void *pvParameters)
+			{
+			    EventBits_t uxBits;
+
+			    for(;;)
+			    {
+			        // Chờ EITHER UART RX HOẶC ADC Done (logic OR)
+			        uxBits = xEventGroupWaitBits(xSystemEventGroup,
+			                                     EVENT_BITS_UART_RX | EVENT_BITS_ADC_DONE,
+			                                     pdTRUE,           // Tự động xóa bit sau khi nhận
+			                                     pdFALSE,          // OR - chỉ cần 1 bit
+			                                     portMAX_DELAY);
+
+			        if(uxBits & EVENT_BITS_UART_RX)
+			        {
+			            // Xử lý dữ liệu UART
+			        }
+
+			        if(uxBits & EVENT_BITS_ADC_DONE)
+			        {
+			            // Xử lý kết quả ADC
+			        }
+
+			        if(uxBits & EVENT_BITS_ERROR)
+			        {
+			            // Xử lý lỗi
+			        }
+			    }
+			}  
+
+	* VD2:
+
+			// Chờ cả UART RX VÀ ADC Done mới tiếp tục
+			uxBits = xEventGroupWaitBits(xSystemEventGroup,
+			                             EVENT_BITS_UART_RX | EVENT_BITS_ADC_DONE,
+			                             pdTRUE,
+			                             pdTRUE,        // AND - phải đủ cả hai
+			                             portMAX_DELAY);
+
+### **IV.  Task Synchronization**
+
+####  **4.1. Multitask Barrier**
+
+#####  **4.1.1. Khái niệm**
+
+*  Điểm hội tụ (Barrier) là một điểm đồng bộ trong chương trình mà tại đó tất cả các Task tham gia phải dừng lại và chờ cho đến khi toàn bộ Task đều đã hoàn thành công việc của mình.
+
+* Chỉ khi tất cả đều “đến nơi”, các Task mới được phép tiếp tục thực hiện các bước tiếp theo.
+	
+#####  **4.1.2. VD:**
+
+* Nhiều Task cùng thu thập dữ liệu từ các cảm biến khác nhau (UART, ADC, I2C, SPI)
+	
+* Tất cả phải hoàn thành việc lấy dữ liệu và xử lý sơ bộ trước khi một Task chính thực hiện tính toán tổng hợp hoặc gửi gói tin ra ngoài.
+	
+* Hoặc trong hệ thống điều khiển: Task điều khiển động cơ, Task đọc encoder, Task giám sát lỗi… phải đồng bộ ở mỗi chu kỳ điều khiển.
+	
+* Nếu không có cơ chế Barrier, lập trình viên thường phải dùng nhiều biến cờ + Mutex + Queue, dẫn đến code phức tạp, dễ gây deadlock và tốn nhiều RAM.
+	
+#####  **4.1.3. API xEventGroupSync()**
+
+*  Hàm `xEventGroupSync()` được thiết kế để thực hiện đồng thời ba thao tác trong một lệnh gọi duy nhất, cực kỳ tiện lợi cho việc xây dựng Barrier
+
+* Cú pháp:
+		
+			EventBits_t xEventGroupSync(
+			    EventGroupHandle_t xEventGroup,
+			    const EventBits_t uxBitsToSet,       // Các bit mà Task này sẽ set (báo cáo hoàn thành)
+			    const EventBits_t uxBitsToWaitFor,   // Các bit mà Task phải chờ (tất cả Task khác)
+			    TickType_t xTicksToWait              // Thời gian chờ tối đa
+			);
+
+	* Báo cáo hoàn thành: Task tự động đặt (set) các bit chỉ định trong `uxBitsToSet`.
+
+	*  Chờ các Task khác: Task sẽ bị Blocked cho đến khi tất cả các bit trong `uxBitsToWaitFor` đều được set bởi các Task khác.
+
+	* Tự động xóa cờ: Sau khi tất cả các bit `uxBitsToWaitFor` đã đủ, hàm sẽ tự động xóa toàn bộ các bit trong uxBitsToWaitFor trước khi trả về.
+		
+	* Điều này giúp Barrier sẵn sàng cho chu kỳ đồng bộ tiếp theo mà không cần code xóa thủ công. 
+		
+* VD: Barrier với 3 Task
+
+		#define BIT_TASK1_READY     (1UL << 0)
+		#define BIT_TASK2_READY     (1UL << 1)
+		#define BIT_TASK3_READY     (1UL << 2)
+		#define ALL_TASKS_READY     (BIT_TASK1_READY | BIT_TASK2_READY | BIT_TASK3_READY)
+
+		void vTask1(void *pvParameters)
+		{
+		    for(;;)
+		    {
+		        // Task 1 thực hiện công việc...
+		        // ...
+
+		        // Đồng bộ với các Task còn lại
+		        xEventGroupSync(xSystemEventGroup,
+		                        BIT_TASK1_READY,      // Task này báo cáo hoàn thành
+		                        ALL_TASKS_READY,      // Chờ tất cả 3 Task
+		                        portMAX_DELAY);
+
+		        // Khi hàm trả về → tất cả Task đã sẵn sàng → tiếp tục chu kỳ mới
+		        // Thực hiện công việc tiếp theo (ví dụ: tính toán tổng hợp)
+		    }
+		}
+
+		void vTask2(void *pvParameters)
+		{
+		    for(;;)
+		    {
+		        // Task 2 thực hiện công việc...
+		        // ...
+
+		        xEventGroupSync(xSystemEventGroup, BIT_TASK2_READY, ALL_TASKS_READY, portMAX_DELAY);
+		        
+		        // Tiếp tục công việc chung
+		    }
+		}
+
+		void vTask3(void *pvParameters)
+		{
+		    for(;;)
+		    {
+		        // Task 3 thực hiện công việc...
+		        // ...
+
+		        xEventGroupSync(xSystemEventGroup, BIT_TASK3_READY, ALL_TASKS_READY, portMAX_DELAY);
+		    }
+		}
+						
+   </details> 
+
